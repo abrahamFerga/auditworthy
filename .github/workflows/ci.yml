@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      # No secrets are configured, deliberately. The Mock chat provider, the Mock embedder and
+      # dev-auth are what make that possible — a build that needs an API key is wrong.
+      - name: Restore
+        run: dotnet restore Auditworthy.slnx
+
+      - name: Build
+        run: dotnet build Auditworthy.slnx --no-restore -warnaserror
+
+      # The module guard: manifest integrity, tool/permission parity, approval gating in both
+      # places, and a HasQueryFilter on every ITenantOwned entity. Needs no Docker.
+      - name: Test
+        run: dotnet test Auditworthy.slnx --no-build --verbosity normal

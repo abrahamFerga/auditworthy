@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Auditworthy's domain module — compliance and audit management, implemented as a Plenipo
+       module (IModule + manifest). The Plenipo platform (packages below) supplies auth,
+       multi-tenancy, RBAC-before-the-model, approvals, append-only audit, chat/agents, document
+       tools, OCR, RAG and jobs; this project owns ONLY the compliance domain: frameworks,
+       requirements, controls, evidence and remediation. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Auditworthy.Compliance.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.7.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10" PrivateAssets="all" />
+    <PackageReference Include="Plenipo.Core" Version="0.1.0-alpha.28" />
+    <PackageReference Include="Plenipo.Application" Version="0.1.0-alpha.28" />
+    <PackageReference Include="Plenipo.Modules.Sdk" Version="0.1.0-alpha.28" />
+  </ItemGroup>
+
+</Project>

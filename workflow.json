@@ -1,0 +1,67 @@
+{
+  "name": "auditworthy",
+  "industry": "regulatory-compliance",
+  "loop": "deliver",
+  "platform": {
+    "version": "0.1.0-alpha.28",
+    "feed": "vendored"
+  },
+  "cloud": "none",
+  "connectors": [],
+  "capabilities": [
+    {
+      "name": "vector-db",
+      "provider": "pgvector"
+    },
+    {
+      "name": "file-storage",
+      "provider": "local"
+    }
+  ],
+  "github": {
+    "repo": "abrahamFerga/auditworthy",
+    "visibility": "public"
+  },
+  "autonomy": {
+    "level": 0,
+    "maxOpenPRs": 3,
+    "maxMergesPerTick": 2,
+    "readyFloor": 3,
+    "maxIssuesPerSweep": 8,
+    "maxNewCapabilities": 5
+  },
+  "skills": {
+    "self": {
+      "marketplace": "plenipo-agents",
+      "repo": "abrahamFerga/plenipo-agents",
+      "plugins": [
+        "plenipo",
+        "harness",
+        "scout",
+        "define",
+        "shape",
+        "deliver"
+      ]
+    },
+    "external": [
+      {
+        "marketplace": "dotnet/skills",
+        "plugins": [
+          "dotnet",
+          "dotnet-aspnet",
+          "dotnet-data",
+          "dotnet-ai"
+        ],
+        "reason": "Authoritative .NET coding-agent skills maintained by the .NET team — Aspire wiring, ASP.NET Core minimal-API conventions, EF Core migrations, MAF / Azure OpenAI patterns."
+      },
+      {
+        "marketplace": "anthropics/skills",
+        "plugins": [
+          "pdf",
+          "docx"
+        ],
+        "reason": "The auditor-ready export pack (epic 7) and evidence documents are PDF and DOCX; policies and certificates arrive as scanned PDFs."
+      }
+    ]
+  }
+}

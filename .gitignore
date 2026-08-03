@@ -1,0 +1,21 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+
+# Local runtime state
+data/
+node_modules/
+dist/
+
+# Never commit real secrets. The AI provider is configured per tenant at runtime
+# under Admin -> AI Settings and stored write-only in the platform's secret vault.
+appsettings.*.local.json
+*.env
+.env
+
+# The vendored platform packages ARE committed on purpose (.packages/) -- they publish
+# only to a feed that needs a PAT, so vendoring is what keeps `dotnet restore` working
+# on a bare clone. Do not add .packages/ here.

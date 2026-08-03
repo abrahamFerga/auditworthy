@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Auditworthy.AppHost/Auditworthy.AppHost.csproj" />
+    <Project Path="src/Auditworthy.Host/Auditworthy.Host.csproj" />
+    <Project Path="src/Auditworthy.Compliance/Auditworthy.Compliance.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Auditworthy.Compliance.Tests/Auditworthy.Compliance.Tests.csproj" />
+    <Project Path="tests/Auditworthy.IntegrationTests/Auditworthy.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,18 @@
+{
+  "extraKnownMarketplaces": {
+    "plenipo-agents": {
+      "source": {
+        "source": "github",
+        "repo": "abrahamFerga/plenipo-agents"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "plenipo@plenipo-agents": true,
+    "harness@plenipo-agents": true,
+    "scout@plenipo-agents": true,
+    "define@plenipo-agents": true,
+    "shape@plenipo-agents": true,
+    "deliver@plenipo-agents": true
+  }
+}
