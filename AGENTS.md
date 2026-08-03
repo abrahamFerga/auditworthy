@@ -63,9 +63,25 @@ tests/Auditworthy.IntegrationTests   empty shell; /deliver:install-runbook owns 
 
 Trust ranking: **source > tests > platform docs > product docs.**
 
-- The host API is `builder.AddPlenipoPlatform()` / `app.UsePlenipoPlatform()`, from
-  `Plenipo.AspNetCore.Hosting` (`AddPlenipoModule<T>` is in `Plenipo.AspNetCore.Modules`). Plenipo's
-  `BUILDING_A_PRODUCT.md` documents `AddPlenipo()` / `UsePlenipo()` — **those do not exist.**
+- The host API is `builder.AddPlenipoPlatform()`, from `Plenipo.AspNetCore.Hosting`
+  (`AddPlenipoModule<T>` is in `Plenipo.AspNetCore.Modules`). Plenipo's `BUILDING_A_PRODUCT.md`
+  documents `AddPlenipo()` / `UsePlenipo()` — **those do not exist.**
+- **The terminal call is `await app.RunPlenipoPlatformAsync()`, NOT `app.UsePlenipoPlatform(); app.Run();`.**
+  `UsePlenipoPlatform` only configures the pipeline. `RunPlenipoPlatformAsync` also calls
+  `InitializePlenipoAsync`, which applies the platform and audit migrations and then every module's
+  migrations and seed data (`PlenipoHostSetup.cs:199-215`). Get this wrong and the app boots, serves
+  500s forever, and blames the job processor: `42P01: relation "platform.background_jobs" does not
+  exist`. It looks like a job bug. It is a missing migration step.
+- **`IModuleToolSource` must be registered as a SINGLETON.** The platform's `IToolRegistry` is a
+  singleton that consumes every source, so `AddScoped<IModuleToolSource, …>` fails DI validation at
+  startup and takes six other platform services down with it. This is why `GetTools` receives the
+  scoped `IServiceProvider` as a **parameter** rather than injecting it — resolve scoped services
+  (like the `DbContext`) inside the call.
+- **Do not `WaitFor` the two database resources in the AppHost — wait for the postgres server.** A
+  database resource's health check connects to that database by name, but nothing creates it except
+  this API's own `DatabaseInitializer`. Waiting on the databases is a circular wait: containers go
+  healthy, the dashboard comes up, and the API is simply never started, with postgres logging
+  `FATAL: database "plenipo-platform" does not exist` where nobody is looking.
 - **Plenipo packages are not on nuget.org.** They are vendored in `.packages/` and pinned by
   `packageSourceMapping` in `nuget.config` to prevent dependency-confusion fallback.
 - **Postgres must be `pgvector/pgvector`** — the platform's RAG migration creates a vector column at

@@ -59,9 +59,15 @@ builder.Services.AddPlenipoRole("compliance-owner",
 
 var app = builder.Build();
 
-app.UsePlenipoPlatform();
-
-app.Run();
+// RunPlenipoPlatformAsync = UsePlenipoPlatform() + InitializePlenipoAsync() + RunAsync().
+//
+// Do NOT reduce this to `app.UsePlenipoPlatform(); app.Run();`. UsePlenipoPlatform only configures
+// the pipeline; InitializePlenipoAsync is what applies the platform and audit migrations, then each
+// module's migrations and seed data. Without it the app starts and serves 500s forever, because
+// every request hits tables that were never created — the visible symptom is
+// `42P01: relation "platform.background_jobs" does not exist` from the job processor, which looks
+// like a job bug and is not one.
+await app.RunPlenipoPlatformAsync();
 
 // Required so WebApplicationFactory<Program> can host the app from the integration tests.
 public partial class Program;

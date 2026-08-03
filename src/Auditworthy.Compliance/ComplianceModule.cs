@@ -115,7 +115,15 @@ public sealed class ComplianceModule : IModule
             options.UseNpgsql(configuration.GetConnectionString("plenipo-platform")));
 
         services.AddScoped<ComplianceTools>();
-        services.AddScoped<IModuleToolSource, ComplianceToolSource>();
+
+        // IModuleToolSource MUST be a singleton: the platform's IToolRegistry is a singleton and
+        // consumes every registered source, so a scoped registration fails DI validation at
+        // startup with "Cannot consume scoped service IModuleToolSource from singleton
+        // IToolRegistry" — and takes six other platform services down with it.
+        // This is why IModuleToolSource.GetTools receives the scoped IServiceProvider as a
+        // PARAMETER instead of injecting it: the source is a singleton that resolves the scoped
+        // ComplianceTools (and its DbContext) per call.
+        services.AddSingleton<IModuleToolSource, ComplianceToolSource>();
     }
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints)

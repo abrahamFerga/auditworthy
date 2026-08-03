@@ -44,8 +44,19 @@ builder.AddProject<Projects.Auditworthy_Host>("auditworthy-api")
     .WithReference(platformDb)
     .WithReference(auditDb)
     .WithReference(redis)
-    .WaitFor(platformDb)
-    .WaitFor(auditDb)
+    // Wait for the postgres SERVER, not the two database resources — and this is load-bearing.
+    //
+    // A database resource's health check connects to that database by name, and on a fresh volume
+    // neither database exists yet. Nothing else creates them: the platform's DatabaseInitializer
+    // does, via MigrateAsync()/EnsureCreatedAsync(), and it runs *inside this API*. So waiting on
+    // the databases is a circular wait — the check can only pass after the API starts, and the API
+    // cannot start until the check passes. The symptom is silent: containers healthy, dashboard up,
+    // API simply absent, and postgres logging `FATAL: database "plenipo-platform" does not exist`
+    // where nobody is looking.
+    //
+    // Waiting on the server keeps the real intent (do not start before Postgres accepts
+    // connections) with no deadlock. Do not "fix" a slow first boot by putting these back.
+    .WaitFor(postgres)
     .WithExternalHttpEndpoints();
 
 builder.Build().Run();
