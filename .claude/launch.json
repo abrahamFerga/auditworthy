@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "auditworthy",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "src/Auditworthy.AppHost",
+        "--",
+        "--ASPNETCORE_URLS=https://localhost:18888"
+      ],
+      "port": 18888,
+      "url": "https://localhost:18888"
+    }
+  ]
+}

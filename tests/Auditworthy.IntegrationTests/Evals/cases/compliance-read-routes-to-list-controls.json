@@ -1,0 +1,11 @@
+{
+  "name": "compliance-read-routes-to-list-controls",
+  "module": "compliance",
+  "message": "Which controls are not yet effective?",
+  "role": "system_admin",
+  "expectToolCalls": ["list_controls"],
+  "forbidToolCalls": ["propose_control_change"],
+  "expectApproval": false,
+  "replyMustContain": [],
+  "replyMustNotContain": []
+}

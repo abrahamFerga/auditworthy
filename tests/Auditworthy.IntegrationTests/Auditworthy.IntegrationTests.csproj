@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Boots the real host against a real Postgres via Testcontainers. The fixture, the .http
-       catalog and the golden-eval harness are installed by /deliver:install-runbook, which owns
-       that contract — this project is deliberately the empty shell it lands in, so there is one
-       source of truth for the run-and-prove surface rather than two that drift. -->
+  <!-- Boots the real host against a real Postgres via Testcontainers: platform + module migrations,
+       real seeding, real job processor, real approval store. The Mock AI provider is the only
+       stand-in, which is what lets rungs 3 and 4 run on a bare clone with no API key.
+       Installed and owned by /deliver:install-runbook — re-running it reconciles this project. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -22,6 +22,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Auditworthy.Host\Auditworthy.Host.csproj" />
+  </ItemGroup>
+
+  <!-- Golden-conversation evals are data, not code: without this they never reach the test output
+       and GoldenEvalTests runs zero cases while reporting green. -->
+  <ItemGroup>
+    <Content Include="Evals\cases\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

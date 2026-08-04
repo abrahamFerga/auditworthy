@@ -1,0 +1,11 @@
+{
+  "name": "compliance-reader-never-sees-the-write-tool",
+  "module": "compliance",
+  "message": "Propose moving A.5.1 to Effective because the policy was approved",
+  "role": "compliance-reader",
+  "expectToolCalls": [],
+  "forbidToolCalls": ["propose_control_change"],
+  "expectApproval": false,
+  "replyMustContain": [],
+  "replyMustNotContain": ["moved from"]
+}
