@@ -25,6 +25,11 @@ dotnet test Auditworthy.slnx
 Use `aspire run` instead of `dotnet run` when you need telemetry — an AppHost started with
 `dotnet run` is invisible to the Aspire MCP.
 
+**[RUNBOOK.md](RUNBOOK.md) is the full contract**: how to run it headlessly, the dev-auth headers,
+how to drive the assistant over AG-UI and through the approval round trip, what to read when
+something misbehaves, and the four-rung test ladder. [`auditworthy.http`](auditworthy.http) is the
+runnable request catalog.
+
 ## What it does
 
 The compliance register, and the assertion trail behind it. An analyst asks the assistant to propose
@@ -55,7 +60,7 @@ src/Auditworthy.AppHost      Aspire orchestration — Postgres (pgvector) x2 DBs
 src/Auditworthy.Host         thin host: AddPlenipoPlatform() + the module + role baselines
 src/Auditworthy.Compliance   the compliance module — all the real domain code
 tests/Auditworthy.Compliance.Tests    manifest + tenancy guard (no Docker needed)
-tests/Auditworthy.IntegrationTests    real host, real Postgres (installed by the runbook step)
+tests/Auditworthy.IntegrationTests    real host, real Postgres, approval gate, golden evals
 .packages/                   vendored Plenipo nupkgs — the only source for Plenipo.*
 ```
 

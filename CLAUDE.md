@@ -8,10 +8,9 @@ and this repo is developed there.
 
 ## Claude-specific
 
-- **There is no `run-auditworthy` skill yet.** `/deliver:install-runbook` installs `RUNBOOK.md`, the
-  Testcontainers fixture, the golden-eval harness, the committed `.http` catalog and
-  `.claude/launch.json`. Run it before the first feature issue — a product nobody can run is a
-  product nobody can verify.
+- **Use the `run-auditworthy` skill** (`.claude/skills/run-auditworthy/`) to run, observe or test
+  this product; it indexes `RUNBOOK.md`, which is the source of truth. Re-run
+  `/deliver:install-runbook` only to reconcile that surface after it drifts, never to run the app.
 - **Plugins are declared, not vendored.** `.claude/settings.json` and `workflow.json` must agree. A
   marketplace is keyed by the `name` field in its own `.claude-plugin/marketplace.json` — **not** by
   its `owner/repo` slug. Getting that wrong resolves zero plugins, silently.

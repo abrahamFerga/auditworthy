@@ -1,0 +1,200 @@
+# Auditworthy — the runnable request catalog.
+#
+# Installed by /deliver:install-runbook. Fire these at a running instance from VS Code (REST
+# Client) or a JetBrains IDE. Dev-auth headers mean there is no token setup — see RUNBOOK.md §3.
+#
+# WHEN YOU ADD AN ENDPOINT, ADD ITS REQUEST HERE IN THE SAME PR. A catalog that lags the code is
+# how the next agent concludes a working endpoint is missing.
+#
+# @base — under Aspire the API port is dynamic: take the external HTTP endpoint of the
+# `auditworthy-api` resource from the dashboard and paste it here. Under RUNBOOK.md Mode B it is
+# whatever you passed to --urls (8094 below).
+
+@base   = http://127.0.0.1:8094
+@module = compliance
+
+# Swap the role to assert a boundary: compliance-reader (reads only), compliance-analyst (may
+# propose, may NOT approve), compliance-owner (may approve), system_admin (holds `*`).
+@subject = dev-user
+@tenant  = dev
+@roles   = system_admin
+
+
+### ─────────────────────────────────────────────────────────────────────── liveness ───
+# Never calls the LLM — safe to poll while waiting for a cold boot.
+GET {{base}}/alive
+
+### Dependencies (DB, Redis) reachable. Assert this too: a Development-only /health means the
+### production liveness probe 404s against a perfectly healthy app.
+GET {{base}}/health
+
+
+### ──────────────────────────────────────────────────────────────────────── platform ───
+### Modules and the tabs this caller may see. Must contain `compliance` with chat + controls.
+GET {{base}}/api/platform/modules
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+### Who the platform thinks you are, and your effective permissions.
+GET {{base}}/api/platform/me
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+
+### ────────────────────────────────────────────────────────────────── compliance API ───
+### The Controls tab's data endpoint — the server-driven table behind /compliance/controls.
+### Requires `compliance.view`.
+GET {{base}}/api/compliance/controls
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+
+### ──────────────────────────────────────────────────────────── chat over AG-UI (SSE) ───
+### A read turn. Expect: RUN_STARTED, TOOL_CALL_START(list_controls), TEXT_MESSAGE_*,
+### CUSTOM(token_usage), RUN_FINISHED. No CUSTOM(approval_required).
+POST {{base}}/api/agui/{{module}}
+Content-Type: application/json
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+{
+  "messages": [
+    { "id": "m1", "role": "user", "content": "Which controls are not yet effective?" }
+  ]
+}
+
+### One control in detail.
+POST {{base}}/api/agui/{{module}}
+Content-Type: application/json
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+{
+  "messages": [
+    { "id": "m1", "role": "user", "content": "Show me control A.5.1" }
+  ]
+}
+
+### A WRITE. Expect CUSTOM(approval_required) and a reply that does NOT claim the status changed.
+### If this ever executes straight through, the product's central claim is broken — stop and read
+### RUNBOOK.md §6.
+POST {{base}}/api/agui/{{module}}
+Content-Type: application/json
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+{
+  "messages": [
+    { "id": "m1", "role": "user", "content": "Propose moving A.5.1 to Effective because the policy was approved" }
+  ]
+}
+
+### The same write as compliance-reader. The tool is never offered to the model at all — RBAC runs
+### BEFORE the model, so there is nothing to jailbreak. Expect no TOOL_CALL_START for it.
+POST {{base}}/api/agui/{{module}}
+Content-Type: application/json
+X-Dev-Subject: it-reader
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: compliance-reader
+
+{
+  "messages": [
+    { "id": "m1", "role": "user", "content": "Propose moving A.5.1 to Effective because the policy was approved" }
+  ]
+}
+
+
+### ─────────────────────────────────────────────────────────────────────── approvals ───
+### What is parked, with the arguments a human is being asked to sign off. Copy an `id` into
+### @approvalId below. As compliance-analyst this returns 403, by design.
+GET {{base}}/api/chat/approvals
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+@approvalId = 00000000-0000-0000-0000-000000000000
+
+### Approve → the call runs. Returns status "Executed" and the tool's own return value in `result`.
+POST {{base}}/api/chat/approvals/{{approvalId}}/approve
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+### Reject → nothing runs. Returns status "Rejected".
+POST {{base}}/api/chat/approvals/{{approvalId}}/reject
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+
+### ─────────────────────────────────────────────────────────────────── conversations ───
+GET {{base}}/api/chat/conversations
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+
+### ─────────────────────────────────────────────────────────────────────────── admin ───
+### THE tool-wiring check. Every compliance tool must appear with its permission, and
+### propose_control_change must be the only one with requiresApproval: true. A tool missing here
+### is registered in the manifest but not in ComplianceToolSource (or vice versa) and is silently
+### never callable.
+GET {{base}}/api/admin/security/catalog
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+### Role baselines as seeded from Program.cs, editable per tenant at runtime.
+GET {{base}}/api/admin/roles
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+### compliance-analyst must NOT hold chat.approvals.manage or a tools.compliance.* wildcard.
+GET {{base}}/api/admin/roles/compliance-analyst/permissions
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+### Users in the tenant.
+GET {{base}}/api/admin/users
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+### Append-only: every tool invocation, who ran it, and whether it succeeded.
+GET {{base}}/api/admin/audit/tool-calls
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+### Sign-in and permission-denial events.
+GET {{base}}/api/admin/audit/auth-events
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+### Token usage — empty until at least one chat turn has run.
+GET {{base}}/api/admin/usage?days=30
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+### Per-tenant AI provider config. Keys are write-only in the vault and never appear in a response
+### or in any file in this repo.
+GET {{base}}/api/admin/ai-settings
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+### Background jobs.
+GET {{base}}/api/jobs
+X-Dev-Subject: {{subject}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}

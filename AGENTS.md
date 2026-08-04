@@ -19,9 +19,10 @@ including the approval gate.
 Use **`aspire run`** when you need telemetry: an AppHost started with `dotnet run` is invisible to
 the Aspire MCP, which is the agent-readable observability path.
 
-`dotnet build` proves nothing about behaviour. **There is no RUNBOOK.md yet** — run
-`/deliver:install-runbook` before working the first feature issue, and until then say plainly that
-this product has no runtime proof.
+`dotnet build` proves nothing about behaviour. **[RUNBOOK.md](RUNBOOK.md) is the run-and-prove
+contract** — headless mode, dev-auth headers, the AG-UI event stream, the approval round trip, the
+four-rung test ladder and the gotcha table. Read it before running or debugging anything, and use
+the committed [`auditworthy.http`](auditworthy.http) catalog rather than reconstructing requests.
 
 ## Layout
 
@@ -30,7 +31,7 @@ src/Auditworthy.AppHost      Aspire orchestration — see the comments, each is 
 src/Auditworthy.Host         thin host: AddPlenipoPlatform() + module + three role baselines
 src/Auditworthy.Compliance   the compliance module — all the real domain code
 tests/Auditworthy.Compliance.Tests   manifest + tenancy guard (no Docker)
-tests/Auditworthy.IntegrationTests   empty shell; /deliver:install-runbook owns its content
+tests/Auditworthy.IntegrationTests   real host on Testcontainers: approval gate, RBAC, golden evals
 .packages/                   vendored Plenipo nupkgs — the only source for Plenipo.*
 ```
 
@@ -89,6 +90,21 @@ Trust ranking: **source > tests > platform docs > product docs.**
 - **This AppHost pins host port 15433, not 15432.** 15432 is Networthy's. Two AppHosts mounting one
   data volume destroy the cluster; the pinned port makes the second run fail fast instead. Never
   unpin it to resolve a conflict.
+- **A module's own schema is created by the module, not the platform.** `IModule` declares
+  `MigrateAsync` and `SeedAsync`; `ComplianceModule` implements **neither**, so nothing ever creates
+  `compliance.controls`. Observed at runtime, not inferred: the Controls endpoint 500s and every
+  compliance tool returns `Error: Function failed.` behind
+  `42P01: relation "compliance.controls" does not exist`. The platform migrates *itself* and then
+  calls each module — it cannot invent your DDL.
+- **The AG-UI wire vocabulary** (read off a live alpha.28 host): `RUN_STARTED`, `TOOL_CALL_START`
+  (with `toolCallName`) / `TOOL_CALL_END`, `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` (`delta`) /
+  `TEXT_MESSAGE_END`, `CUSTOM` with `name` of `approval_required` or `token_usage`, and
+  `RUN_FINISHED` carrying `result.conversationId`. Tool calls arrive **before** the assistant text,
+  and `token_usage` lands **before** `TEXT_MESSAGE_END`.
+- **The Mock provider fills tool arguments with `"example"`** and puts the user's whole message in
+  the first string parameter. Golden evals can therefore assert routing, gating and protocol — never
+  domain results. Its replies also legitimately open with "Done — I called the … tool", so a
+  `replyMustNotContain` of `"done"` fails on a correctly gated turn.
 - `EF Core 10`: `IReadOnlyEntityType.GetQueryFilter()` is obsolete — use `GetDeclaredQueryFilters()`.
 - The module id is `compliance`. Roles are `compliance-reader`, `compliance-analyst`,
   `compliance-owner`. A client organisation is a tenant.

@@ -1,0 +1,11 @@
+{
+  "name": "compliance-write-requires-approval",
+  "module": "compliance",
+  "message": "Propose moving A.5.1 to Effective because the policy was approved",
+  "role": "system_admin",
+  "expectToolCalls": ["propose_control_change"],
+  "forbidToolCalls": [],
+  "expectApproval": true,
+  "replyMustContain": ["approval"],
+  "replyMustNotContain": ["moved from", "is now effective", "is now compliant", "certified"]
+}
