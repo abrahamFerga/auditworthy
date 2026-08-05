@@ -28,6 +28,16 @@ public sealed class ComplianceDbContext(
 {
     public const string Schema = "compliance";
 
+    /// <summary>
+    /// The module's own migrations-history table, in the module's own schema.
+    /// </summary>
+    /// <remarks>
+    /// It must NOT be the default <c>public.__EFMigrationsHistory</c>: the module shares a database
+    /// with the platform, so a shared history table would let either side believe the other's
+    /// migrations were its own and skip applying them.
+    /// </remarks>
+    public const string MigrationsHistoryTable = "__EFMigrationsHistory";
+
     public DbSet<Control> Controls => Set<Control>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -45,7 +55,11 @@ public sealed class ComplianceDbContext(
             entity.Property(e => e.Description).HasMaxLength(4000);
             entity.Property(e => e.Owner).HasMaxLength(256);
             entity.Property(e => e.Status).HasConversion<string>().HasMaxLength(32);
-            entity.HasIndex(e => new { e.TenantId, e.Reference });
+            // UNIQUE, and that is load-bearing rather than tidy: a reference identifies a control
+            // within an organisation, and the uniqueness is what makes a concurrent seed (two hosts
+            // booting against one fresh database) fail loudly instead of silently duplicating every
+            // row of the register.
+            entity.HasIndex(e => new { e.TenantId, e.Reference }).IsUnique();
 
             // The tenant boundary. One per ITenantOwned entity, always.
             entity.HasQueryFilter(e => e.TenantId == tenantContext.TenantId);
