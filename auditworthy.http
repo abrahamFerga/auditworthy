@@ -151,13 +151,15 @@ X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
 ### Role baselines as seeded from Program.cs, editable per tenant at runtime.
+###
+### THIS is where you assert the product's central RBAC claim: in the response,
+### `compliance-analyst` must hold an enumerated allowlist with NO `chat.approvals.manage` and NO
+### `tools.compliance.*` wildcard. An analyst that can clear its own gate makes the approval lane
+### ceremony — see SECURITY.md.
+###
+### There is no per-role GET. `/api/admin/roles/{role}/permissions` exists as **PUT only** (it is
+### the editor, not a reader) and returns 405 for a GET — read the list here instead.
 GET {{base}}/api/admin/roles
-X-Dev-Subject: {{subject}}
-X-Dev-Tenant: {{tenant}}
-X-Dev-Roles: {{roles}}
-
-### compliance-analyst must NOT hold chat.approvals.manage or a tools.compliance.* wildcard.
-GET {{base}}/api/admin/roles/compliance-analyst/permissions
 X-Dev-Subject: {{subject}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
@@ -193,8 +195,10 @@ X-Dev-Subject: {{subject}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
-### Background jobs.
-GET {{base}}/api/jobs
+### Background jobs queued for the calling user. There is no `GET /api/jobs` collection route —
+### the platform exposes `/api/jobs/mine`, `/api/jobs/{jobId}` and `/api/jobs/{jobId}/cancel`.
+### Empty on this product: the compliance module declares no jobs (PLAN.md §9).
+GET {{base}}/api/jobs/mine
 X-Dev-Subject: {{subject}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
