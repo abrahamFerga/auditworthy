@@ -28,6 +28,16 @@ public sealed class ComplianceDbContext(
 {
     public const string Schema = "compliance";
 
+    /// <summary>
+    /// The module's own migrations-history table, in the module's own schema.
+    /// </summary>
+    /// <remarks>
+    /// It must NOT be the default <c>public.__EFMigrationsHistory</c>: the module shares a database
+    /// with the platform, so a shared history table would let either side believe the other's
+    /// migrations were its own and skip applying them.
+    /// </remarks>
+    public const string MigrationsHistoryTable = "__EFMigrationsHistory";
+
     public DbSet<Control> Controls => Set<Control>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

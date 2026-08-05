@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Plenipo.Application.Authorization;
+using Plenipo.Infrastructure.Persistence;
 using Plenipo.Modules.Sdk;
 
 namespace Auditworthy.Compliance;
@@ -29,6 +30,9 @@ public sealed class ComplianceModule : IModule
 
     /// <summary>Permission required to administer the register.</summary>
     public const string ManageCompliance = "compliance.manage";
+
+    /// <summary>The slug of the local development tenant — the only tenant that gets seed data.</summary>
+    private const string DevTenantSlug = "dev";
 
     public ModuleManifest Manifest { get; } = new()
     {
@@ -112,7 +116,11 @@ public sealed class ComplianceModule : IModule
     public void RegisterServices(IServiceCollection services, IConfiguration configuration)
     {
         services.AddDbContext<ComplianceDbContext>(options =>
-            options.UseNpgsql(configuration.GetConnectionString("plenipo-platform")));
+            options.UseNpgsql(
+                configuration.GetConnectionString("plenipo-platform"),
+                npgsql => npgsql.MigrationsHistoryTable(
+                    ComplianceDbContext.MigrationsHistoryTable,
+                    ComplianceDbContext.Schema)));
 
         services.AddScoped<ComplianceTools>();
 
@@ -125,6 +133,140 @@ public sealed class ComplianceModule : IModule
         // ComplianceTools (and its DbContext) per call.
         services.AddSingleton<IModuleToolSource, ComplianceToolSource>();
     }
+
+    /// <summary>
+    /// Creates the module's own schema. <b>The platform cannot do this for you.</b>
+    /// </summary>
+    /// <remarks>
+    /// <c>InitializePlenipoAsync</c> migrates the platform and audit databases and then calls each
+    /// module — it migrates *itself*, it cannot invent a module's DDL. Because
+    /// <see cref="IModule.MigrateAsync"/> is a defaulted interface member, leaving it unimplemented
+    /// compiles, passes every manifest guard, and boots; the only symptom is
+    /// <c>42P01: relation "compliance.controls" does not exist</c> on the first real request.
+    /// </remarks>
+    public async Task MigrateAsync(IServiceProvider services, CancellationToken cancellationToken)
+    {
+        // A scope of our own: this runs at startup, outside any request, and the context is scoped.
+        await using var scope = services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ComplianceDbContext>();
+
+        // MigrateAsync, never EnsureCreatedAsync. The platform's initializer has already created
+        // this database, so EnsureCreatedAsync would find it present, return false, and create no
+        // tables at all — the silent version of exactly the bug this method fixes.
+        await db.Database.MigrateAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Seeds a starter control register for the <c>dev</c> tenant, and only that tenant.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately not "every tenant". A client organisation's control register is an assertion an
+    /// auditor will later rely on; pre-filling a real tenant's register with sample rows would
+    /// fabricate compliance evidence. A real tenant starts empty, which is the correct empty state.
+    /// </para>
+    /// <para>
+    /// Idempotent: re-runs on every boot, and does nothing once the tenant has any control.
+    /// </para>
+    /// </remarks>
+    public async Task SeedAsync(IServiceProvider services, CancellationToken cancellationToken)
+    {
+        await using var scope = services.CreateAsyncScope();
+
+        var platform = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
+        var devTenant = await platform.Tenants
+            .FirstOrDefaultAsync(t => t.Slug == DevTenantSlug, cancellationToken);
+
+        // No dev tenant is the normal production case — there is nothing to seed, and that is not
+        // an error.
+        if (devTenant is null)
+        {
+            return;
+        }
+
+        var db = scope.ServiceProvider.GetRequiredService<ComplianceDbContext>();
+
+        // IgnoreQueryFilters is required, not defensive: seeding runs outside a request, so
+        // ITenantContext.TenantId is null, the filter matches nothing, and a filtered check would
+        // report "empty" on every boot and re-seed duplicates forever.
+        var alreadySeeded = await db.Controls
+            .IgnoreQueryFilters()
+            .AnyAsync(c => c.TenantId == devTenant.Id, cancellationToken);
+
+        if (alreadySeeded)
+        {
+            return;
+        }
+
+        db.Controls.AddRange(StarterRegister(devTenant.Id));
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// A small ISO 27001 Annex A register with mixed statuses.
+    /// </summary>
+    /// <remarks>
+    /// The references are clause identifiers; the wording is ours, not the standard's text. Statuses
+    /// vary on purpose so the manifest's own suggested prompts — "Which controls are not yet
+    /// effective?" and "Show me control A.5.1" — both return a real answer on a fresh clone.
+    /// </remarks>
+    private static IEnumerable<Control> StarterRegister(Guid tenantId) =>
+    [
+        new()
+        {
+            TenantId = tenantId,
+            Reference = "A.5.1",
+            Name = "Information security policy",
+            Description = "A management-approved security policy exists, is published, and is reviewed at planned intervals.",
+            Status = ControlStatus.Implemented,
+            Owner = "Head of Security",
+        },
+        new()
+        {
+            TenantId = tenantId,
+            Reference = "A.5.15",
+            Name = "Access control",
+            Description = "Access to information and other associated assets is granted on a business need, and reviewed.",
+            Status = ControlStatus.Effective,
+            Owner = "IT Manager",
+        },
+        new()
+        {
+            TenantId = tenantId,
+            Reference = "A.5.23",
+            Name = "Information security for cloud services",
+            Description = "Acquisition, use and exit of cloud services follow the organisation's security requirements.",
+            Status = ControlStatus.InProgress,
+            Owner = "Head of Platform",
+        },
+        new()
+        {
+            TenantId = tenantId,
+            Reference = "A.6.3",
+            Name = "Security awareness and training",
+            Description = "Staff receive security awareness training relevant to their role, on joining and periodically.",
+            Status = ControlStatus.Implemented,
+            Owner = "People Operations",
+        },
+        new()
+        {
+            TenantId = tenantId,
+            Reference = "A.8.7",
+            Name = "Protection against malware",
+            Description = "Malware protection is implemented and supported by appropriate user awareness.",
+            Status = ControlStatus.Effective,
+            Owner = "IT Manager",
+        },
+        new()
+        {
+            TenantId = tenantId,
+            Reference = "A.8.16",
+            Name = "Monitoring activities",
+            Description = "Networks, systems and applications are monitored for anomalous behaviour and acted upon.",
+            Status = ControlStatus.NotImplemented,
+            Owner = "Head of Platform",
+        },
+    ];
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints)
     {
