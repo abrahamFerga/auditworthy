@@ -55,7 +55,11 @@ public sealed class ComplianceDbContext(
             entity.Property(e => e.Description).HasMaxLength(4000);
             entity.Property(e => e.Owner).HasMaxLength(256);
             entity.Property(e => e.Status).HasConversion<string>().HasMaxLength(32);
-            entity.HasIndex(e => new { e.TenantId, e.Reference });
+            // UNIQUE, and that is load-bearing rather than tidy: a reference identifies a control
+            // within an organisation, and the uniqueness is what makes a concurrent seed (two hosts
+            // booting against one fresh database) fail loudly instead of silently duplicating every
+            // row of the register.
+            entity.HasIndex(e => new { e.TenantId, e.Reference }).IsUnique();
 
             // The tenant boundary. One per ITenantOwned entity, always.
             entity.HasQueryFilter(e => e.TenantId == tenantContext.TenantId);

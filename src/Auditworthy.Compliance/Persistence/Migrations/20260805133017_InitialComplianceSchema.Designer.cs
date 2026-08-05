@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Auditworthy.Compliance.Persistence.Migrations
 {
     [DbContext(typeof(ComplianceDbContext))]
-    [Migration("20260805130615_InitialComplianceSchema")]
+    [Migration("20260805133017_InitialComplianceSchema")]
     partial class InitialComplianceSchema
     {
         /// <inheritdoc />
@@ -72,7 +72,8 @@ namespace Auditworthy.Compliance.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "Reference");
+                    b.HasIndex("TenantId", "Reference")
+                        .IsUnique();
 
                     b.ToTable("controls", "compliance");
                 });

@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Plenipo.Application.Authorization;
-using Plenipo.Infrastructure.Persistence;
+using Plenipo.Core.Multitenancy;
 using Plenipo.Modules.Sdk;
 
 namespace Auditworthy.Compliance;
@@ -31,8 +31,6 @@ public sealed class ComplianceModule : IModule
     /// <summary>Permission required to administer the register.</summary>
     public const string ManageCompliance = "compliance.manage";
 
-    /// <summary>The slug of the local development tenant — the only tenant that gets seed data.</summary>
-    private const string DevTenantSlug = "dev";
 
     public ModuleManifest Manifest { get; } = new()
     {
@@ -157,48 +155,51 @@ public sealed class ComplianceModule : IModule
     }
 
     /// <summary>
-    /// Seeds a starter control register for the <c>dev</c> tenant, and only that tenant.
+    /// Seeds a starter control register into the scope's tenant — in Development only.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Deliberately not "every tenant". A client organisation's control register is an assertion an
-    /// auditor will later rely on; pre-filling a real tenant's register with sample rows would
-    /// fabricate compliance evidence. A real tenant starts empty, which is the correct empty state.
+    /// <b>The absence of a tenant is the production safety gate, and it is the platform's, not
+    /// ours.</b> <c>SeedPlenipoModulesAsync</c> calls this method unconditionally, but it first
+    /// calls <c>EstablishDevTenantContextAsync</c> on this very scope — and *that* is
+    /// <c>IsDevelopment</c>-gated. So outside Development no tenant is ever established and this
+    /// method returns having done nothing.
     /// </para>
     /// <para>
-    /// Idempotent: re-runs on every boot, and does nothing once the tenant has any control.
+    /// Do not "improve" this by opening a new scope and looking the dev tenant up by slug. That
+    /// discards the context the platform just prepared, re-implements a seam that has already run,
+    /// and — because nothing reserves the slug <c>dev</c> — would write fabricated controls into any
+    /// production tenant an operator happened to name that way. A client organisation's register is
+    /// an assertion an auditor later relies on; a real tenant starts empty, which is the correct
+    /// empty state.
+    /// </para>
+    /// <para>
+    /// Idempotent across sequential boots: it does nothing once the tenant has any control. It is
+    /// NOT safe against two hosts seeding the same fresh database concurrently — the unique index on
+    /// (TenantId, Reference) is what makes that race fail loudly instead of duplicating the register.
     /// </para>
     /// </remarks>
     public async Task SeedAsync(IServiceProvider services, CancellationToken cancellationToken)
     {
-        await using var scope = services.CreateAsyncScope();
+        // The platform's scope, used as handed over. No tenant means production — nothing to seed,
+        // and that is success, not an error.
+        var tenant = services.GetRequiredService<ITenantContext>();
 
-        var platform = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
-        var devTenant = await platform.Tenants
-            .FirstOrDefaultAsync(t => t.Slug == DevTenantSlug, cancellationToken);
-
-        // No dev tenant is the normal production case — there is nothing to seed, and that is not
-        // an error.
-        if (devTenant is null)
+        if (!tenant.HasTenant)
         {
             return;
         }
 
-        var db = scope.ServiceProvider.GetRequiredService<ComplianceDbContext>();
+        var db = services.GetRequiredService<ComplianceDbContext>();
 
-        // IgnoreQueryFilters is required, not defensive: seeding runs outside a request, so
-        // ITenantContext.TenantId is null, the filter matches nothing, and a filtered check would
-        // report "empty" on every boot and re-seed duplicates forever.
-        var alreadySeeded = await db.Controls
-            .IgnoreQueryFilters()
-            .AnyAsync(c => c.TenantId == devTenant.Id, cancellationToken);
-
-        if (alreadySeeded)
+        // No IgnoreQueryFilters: the tenant is established, so the query filter scopes this count to
+        // exactly the tenant being seeded — which is the check we want.
+        if (await db.Controls.AnyAsync(cancellationToken))
         {
             return;
         }
 
-        db.Controls.AddRange(StarterRegister(devTenant.Id));
+        db.Controls.AddRange(StarterRegister(tenant.RequireTenantId()));
         await db.SaveChangesAsync(cancellationToken);
     }
 

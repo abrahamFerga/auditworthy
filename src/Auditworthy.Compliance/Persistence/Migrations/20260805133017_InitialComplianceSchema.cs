@@ -40,7 +40,8 @@ namespace Auditworthy.Compliance.Persistence.Migrations
                 name: "IX_controls_TenantId_Reference",
                 schema: "compliance",
                 table: "controls",
-                columns: new[] { "TenantId", "Reference" });
+                columns: new[] { "TenantId", "Reference" },
+                unique: true);
         }
 
         /// <inheritdoc />

@@ -69,7 +69,8 @@ namespace Auditworthy.Compliance.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "Reference");
+                    b.HasIndex("TenantId", "Reference")
+                        .IsUnique();
 
                     b.ToTable("controls", "compliance");
                 });

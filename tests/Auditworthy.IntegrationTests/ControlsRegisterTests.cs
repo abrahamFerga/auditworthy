@@ -61,6 +61,10 @@ public sealed class ControlsRegisterTests(IntegrationFixture fixture)
 
         var rows = JsonDocument.Parse(await client.GetStringAsync("/api/compliance/controls")).RootElement;
 
+        // Without this guard the loop below iterates nothing and the test passes vacuously the
+        // moment seeding regresses — asserting on an empty array is the classic silent no-op test.
+        Assert.NotEmpty(rows.EnumerateArray());
+
         foreach (var row in rows.EnumerateArray())
         {
             foreach (var column in (string[])["reference", "name", "status", "owner"])
