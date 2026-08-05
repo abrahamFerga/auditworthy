@@ -20,7 +20,8 @@
   ],
   "github": {
     "repo": "abrahamFerga/auditworthy",
-    "visibility": "public"
+    "visibility": "public",
+    "project": 10
   },
   "autonomy": {
     "level": 0,
