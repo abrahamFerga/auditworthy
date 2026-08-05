@@ -19,8 +19,14 @@ namespace Auditworthy.IntegrationTests;
 /// This file exists because of a coverage hole worth naming: the Mock provider puts the user's whole
 /// message in the first string parameter and <c>"example"</c> in every other, and
 /// <c>POST /api/chat/approvals/{id}/approve</c> accepts no request body. So there is <b>no</b> HTTP
-/// path that can supply a valid status, and "an approved write actually commits" is unprovable from
-/// outside. Calling the tool directly is the only rung where the happy path can be pinned down.
+/// path that can supply a valid status. Calling the tool directly is the only rung where a valid
+/// status can be exercised at all.
+/// </para>
+/// <para>
+/// <b>This does NOT close #30, and must not be read as doing so.</b> What is proven below is that the
+/// tool commits when invoked directly — not that an <i>approved</i> write commits. The link between
+/// the approval lane and the commit stays unproven, because the fixture bypasses that lane by
+/// design. #30 stays open until something can drive valid arguments through the lane itself.
 /// </para>
 /// </remarks>
 [Collection("api")]

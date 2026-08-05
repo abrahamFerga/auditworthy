@@ -100,13 +100,21 @@ public sealed class ChatAndApprovalTests(IntegrationFixture fixture)
     /// An approved write that cannot be applied must not resolve as if it had been.
     /// </summary>
     /// <remarks>
-    /// The sibling test above asserts only <c>status == "Executed"</c>, which is exactly why this
-    /// one is needed: the tool used to *return* its validation failure as an ordinary string, so
-    /// the platform saw a tool that ran, resolved the approval <c>Executed</c>, wrote
-    /// "✅ … ran" into the transcript and reported <c>error: null</c> — while the control was
-    /// untouched. An accountable owner was told the opposite of what happened, which is the one
-    /// outcome this product exists to prevent. Through <c>AdminClient</c>, because it is a claim
-    /// about the approval lane.
+    /// <para>
+    /// The tool used to *return* its validation failure as an ordinary string, so the platform saw a
+    /// tool that ran to completion: it resolved the approval <c>Executed</c>, wrote "✅ … ran" into
+    /// the transcript and reported <c>error: null</c> — while the control was untouched. An
+    /// accountable owner was told the opposite of what happened, which is the one outcome this
+    /// product exists to prevent. Through <c>AdminClient</c>, because it is a claim about the
+    /// approval lane.
+    /// </para>
+    /// <para>
+    /// <b>The HTTP response is the weaker half of this test.</b> What #29 is actually about is the
+    /// <i>durable</i> record: a response is read once, but `ai-decisions` is what someone reviewing
+    /// the decision later reads, and SECURITY.md makes that trail this product's deliverable rather
+    /// than a safety net. So the load-bearing assertion here is the non-null <c>error</c> on the
+    /// recorded decision, which read <c>null</c> before the fix.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task Approving_a_write_that_cannot_be_applied_does_not_report_success()
@@ -120,12 +128,27 @@ public sealed class ChatAndApprovalTests(IntegrationFixture fixture)
         var response = await client.PostAsync($"/api/chat/approvals/{id}/approve", null);
 
         Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.DoesNotContain("\"status\":\"Executed\"", body);
+        Assert.DoesNotContain("\"status\":\"Executed\"", await response.Content.ReadAsStringAsync());
 
-        // The reason must survive to the caller: a bare 500 would be honest about failure but
-        // useless to the human deciding what to do next.
-        Assert.Contains("is not a valid status", body);
+        // The durable record must not say the approved action succeeded. This is the assertion that
+        // goes red on the unfixed code, where `error` was null.
+        var decisions = JsonDocument.Parse(
+            await client.GetStringAsync("/api/platform/ai-decisions")).RootElement;
+
+        var decision = decisions.EnumerateArray()
+            .FirstOrDefault(d => d.TryGetProperty("id", out var did)
+                              && did.GetString() == id.ToString());
+
+        Assert.True(decision.ValueKind == JsonValueKind.Object,
+            $"No ai-decisions entry recorded for approval {id} — the decision left no durable trace at all.");
+
+        var hasError = decision.TryGetProperty("error", out var error)
+                       && error.ValueKind != JsonValueKind.Null
+                       && !string.IsNullOrWhiteSpace(error.GetString());
+
+        Assert.True(hasError,
+            "ai-decisions recorded the approved write with no error, so the durable record still "
+            + "claims an action succeeded that never applied — the defect in #29.");
     }
 
     [Fact]

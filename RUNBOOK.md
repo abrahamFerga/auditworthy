@@ -182,9 +182,19 @@ Invoke-RestMethod "$base/api/chat/approvals/$id/approve" -Method Post -Headers $
 Invoke-RestMethod "$base/api/chat/approvals/$id/reject"  -Method Post -Headers $h
 ```
 
-Approving returns the resolved call with `status: "Executed"` and the tool's own return value in
-`result`. Rejecting returns `status: "Rejected"` and runs nothing. A caller without
-`chat.approvals.manage` — **`compliance-analyst`, deliberately** — gets a **403** on the queue.
+Approving **runs** the call and resolves it — the outcome is whatever the tool actually did. When the
+tool succeeds you get `status: "Executed"` with its return value in `result`. When it cannot apply the
+change you get a **non-200** (today a `422` carrying the tool's own message), the approval resolves
+`Failed`, and `GET /api/platform/ai-decisions` records the error.
+
+**Under the Mock provider that failure is the only path you can reach**, and it is not a bug: the Mock
+puts your whole message in the first string parameter and `"example"` in every other, so the status
+never parses. Do not "fix" a 422 here — a gated write that did not happen must never resolve as one
+that did (see #29), and there is no HTTP way to supply a valid status because `approve` takes no
+request body.
+
+Rejecting returns `status: "Rejected"` and runs nothing. A caller without `chat.approvals.manage` —
+**`compliance-analyst`, deliberately** — gets a **403** on the queue.
 
 ### Admin, RBAC, audit, usage
 
@@ -297,7 +307,8 @@ A test that asserts "this write is approval-gated" **must** go through `AdminCli
 1. a chat turn on `propose_control_change` emits `CUSTOM(approval_required)`, and the reply does
    **not** claim the write happened;
 2. `GET /api/chat/approvals` lists the pending call with its arguments;
-3. `POST …/approve` executes it and clears it from the queue;
+3. `POST …/approve` runs it and clears it from the queue — under the Mock that resolves `Failed`
+   with a 422, because the arguments never parse;
 4. `POST …/reject` discards another without running it;
 5. `compliance-analyst` can park a write and is **403** on the approval queue;
 6. `compliance-reader` is never offered the write tool at all, and still gets its reads.
