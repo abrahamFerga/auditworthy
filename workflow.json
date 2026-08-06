@@ -24,7 +24,13 @@
     "project": 10
   },
   "autonomy": {
-    "level": 0,
+    "//": "level: 0 nothing · 1 docs+tests · 2 features on review · 3 unattended. Set by a human, never inferred — an agent deciding it has earned autonomy is the self-approving loop wearing a different hat.",
+
+    "//set-by": "A human chose 3 in words on 2026-08-05, having been offered 1 (the recommendation, matching the only PR then blocked) and 2. Recorded here because that is the fact a future tick needs and the conversation is gone.",
+
+    "//what-3-means-here": "merge-gate.mjs stops enforcing a change class, so any PR carrying `agent:approved` with green checks merges — feature code included. The remaining brakes are: pr-gates.mjs demands `human-approved` on any diff touching .github/, CODEOWNERS, nuget.config or appsettings; branch protection requires `PR gates` and `build` to pass; and nothing in this repo produces `agent:approved` except /plenipo:ship run by hand, so a human still starts every merge. Do not weaken those while this number is 3 — together they are the whole safety argument.",
+
+    "level": 3,
     "maxOpenPRs": 3,
     "maxMergesPerTick": 2,
     "readyFloor": 3,
