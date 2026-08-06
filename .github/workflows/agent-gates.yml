@@ -36,6 +36,11 @@ jobs:
           git diff --unified=0 "origin/${{ github.base_ref }}...HEAD" > "$RUNNER_TEMP/pr.diff"
 
       # Values arrive as env, never interpolated into the shell — a PR body is untrusted input.
+      # merge-gate decides what may merge, so its own check-rollup handling needs a verifier that
+      # is not a live queue. Fixture-driven, no network, no `gh` — see merge-gate.test.mjs for why.
+      - name: Self-test the merge gate's rollup handling
+        run: node .github/scripts/merge-gate.test.mjs
+
       - name: Evaluate gates
         run: node .github/scripts/pr-gates.mjs "$RUNNER_TEMP/pr.diff"
         env:
