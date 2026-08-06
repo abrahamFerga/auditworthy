@@ -51,6 +51,26 @@ public sealed class ComplianceTools(ComplianceDbContext db, ITenantContext tenan
              + $"{control.Description ?? "No description recorded."}";
     }
 
+    /// <summary>
+    /// Proposes a new status for a control. Approval-gated: the platform parks this call and a
+    /// human approves before the write below is reached.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This method THROWS where the read tools above return guidance, and the difference is
+    /// deliberate.</b> A returned string is, to the platform, a tool that ran to completion — it
+    /// resolves the approval as <c>Executed</c> and reports <c>error: null</c>. That is correct
+    /// behaviour on the platform's part and it cannot know a string means "I did nothing".
+    /// </para>
+    /// <para>
+    /// For an ungated read, describing the problem is right: the model can retry with better
+    /// arguments. For a gated write there is no retry loop — a human has already approved by the
+    /// time this executes — so a write that did not happen must never resolve as one that did.
+    /// Telling an accountable owner a change landed when it did not is the failure this product
+    /// exists to prevent. Throwing is what makes the failure visible to the approval lane and the
+    /// audit trail.
+    /// </para>
+    /// </remarks>
     [Description("Propose a new status for a control. The change is not applied until a human approves it.")]
     public async Task<string> ProposeControlChangeAsync(
         [Description("The control's reference, e.g. 'A.5.1'.")] string reference,
@@ -60,8 +80,10 @@ public sealed class ComplianceTools(ComplianceDbContext db, ITenantContext tenan
     {
         if (!Enum.TryParse<ControlStatus>(status, ignoreCase: true, out var parsed))
         {
-            return $"\"{status}\" is not a valid status. Valid values: "
-                 + string.Join(", ", Enum.GetNames<ControlStatus>()) + ".";
+            throw new ArgumentException(
+                $"\"{status}\" is not a valid status. Valid values: "
+                + string.Join(", ", Enum.GetNames<ControlStatus>()) + ".",
+                nameof(status));
         }
 
         var control = await db.Controls
@@ -69,7 +91,7 @@ public sealed class ComplianceTools(ComplianceDbContext db, ITenantContext tenan
 
         if (control is null)
         {
-            return $"No control found with reference \"{reference}\".";
+            throw new InvalidOperationException($"No control found with reference \"{reference}\".");
         }
 
         var previous = control.Status;
