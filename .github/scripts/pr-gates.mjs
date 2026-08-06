@@ -91,6 +91,30 @@ const PATH_RULES = [
   [/appsettings[^/]*\.json$/i, 'runtime configuration'],
 ];
 
+// ── Guard tests — an explicit list, deliberately not a heuristic ──────────────
+// The rules above are blind to a whole class of change: deleting an *assertion* that guards the
+// spine. PR #32 removed two approval-lane assertions and this check reported green, because none of
+// the CONTENT_RULES strings appear in a diff that only deletes `Assert.` lines. Its green was
+// silence, not a verdict.
+//
+// Scoped to a named list rather than "any removed Assert." on purpose. Flagging every removed
+// assertion fires on ordinary refactoring — merging two tests, replacing three weak asserts with one
+// strong one — and a gate that cries wolf gets muted within a week, which is worse than the gap it
+// was closing. These three files are the ones asserting the approval gate, the analyst boundary, and
+// the manifest/tenant-filter invariants; losing an assertion in any of them is a change to what the
+// product can still prove about itself.
+//
+// The list is not self-protecting by itself — but this file lives under `.github/`, so editing it
+// already trips the path rule above and needs a human. That is the point: the loop cannot quietly
+// narrow the check that judges it.
+const GUARD_TESTS = [
+  [/(^|\/)ChatAndApprovalTests\.cs$/, 'the approval gate'],
+  [/(^|\/)RoleBaselineTests\.cs$/, 'the analyst permission boundary'],
+  [/(^|\/)ManifestGuardTests\.cs$/, 'the manifest and tenant-filter invariants'],
+];
+
+const ASSERTION = /^\s*Assert\./;
+
 if (!diffPath || !existsSync(diffPath)) {
   console.error(`pr-gates: cannot read the diff at "${diffPath}"`);
   process.exit(1);
@@ -111,6 +135,14 @@ for (const line of readFileSync(diffPath, 'utf8').split('\n')) {
   if (line.startsWith('-') && !line.startsWith('---')) {
     for (const [re, what] of CONTENT_RULES) {
       if (re.test(line)) hits.push(`${file} — removes or edits ${what}: ${line.slice(1).trim()}`);
+    }
+
+    // Same removal-scan logic, so an assertion that was *edited* (which appears as both '-' and
+    // '+') is caught alongside one that was deleted outright. Weakening an assertion and deleting
+    // it end in the same place: the product can no longer prove the thing.
+    const guard = GUARD_TESTS.find(([re]) => re.test(file));
+    if (guard && ASSERTION.test(line.slice(1))) {
+      hits.push(`${file} — removes or edits an assertion guarding ${guard[1]}: ${line.slice(1).trim()}`);
     }
   }
 }
