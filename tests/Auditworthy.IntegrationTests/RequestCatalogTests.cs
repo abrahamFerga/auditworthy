@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using Xunit;
 
@@ -29,10 +30,20 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
         var catalog = FindRepoFile("auditworthy.http");
         using var client = fixture.AdminClient();
 
-        var failures = new List<string>();
-        var checked_ = 0;
+        var lines = await File.ReadAllLinesAsync(catalog);
 
-        foreach (var raw in await File.ReadAllLinesAsync(catalog))
+        // Derived from the file, never hardcoded. The previous `> 5` was a guess against a catalog
+        // that actually holds 15 GETs, so ten could have vanished — through a format change the
+        // parser stopped matching, or requests being deleted — while the guard still reported
+        // success over a third of its claimed coverage. A floor that does not track the file is a
+        // floor that stops meaning anything the first time the file grows.
+        var declared = lines.Count(l => l.TrimStart().StartsWith("GET ", StringComparison.Ordinal));
+
+        var failures = new List<string>();
+        var skipped = new List<string>();
+        var checkedCount = 0;
+
+        foreach (var raw in lines)
         {
             var line = raw.Trim();
             if (!line.StartsWith("GET ", StringComparison.Ordinal))
@@ -47,14 +58,17 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
                 .Replace("{{module}}", "compliance", StringComparison.Ordinal);
 
             // An unresolved placeholder means the request needs a value a human pastes in (an id
-            // from a previous response). Those cannot be fired blind, and skipping them is not a
-            // gap this test is hiding — no GET in the catalog uses one today.
+            // from a previous response), and cannot be fired blind. Recorded rather than silently
+            // dropped: skipping is a legitimate answer, but a *silent* skip lets coverage shrink
+            // without anyone noticing — the day someone adds `GET {{base}}/api/jobs/{{jobId}}`, the
+            // catalog grows an untested corner and the guard still says everything resolves.
             if (url.Contains("{{", StringComparison.Ordinal))
             {
+                skipped.Add(url);
                 continue;
             }
 
-            checked_++;
+            checkedCount++;
             var response = await client.GetAsync(url);
 
             // 404 = the route does not exist. 405 = it exists under a different verb. Both mean the
@@ -66,7 +80,31 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
             }
         }
 
-        Assert.True(checked_ > 5, $"Only {checked_} GET requests found in {catalog} — the parser is broken, not the catalog.");
+        // Three separate claims, because they fail for different reasons and a combined assertion
+        // would report the wrong one.
+
+        // 1. The parser still matches something at all. `declared` and the loop share a predicate,
+        //    so they cannot diverge — which means equality alone can NEVER catch a format change
+        //    that stops both matching. Only a nonzero check can, and it needs no maintained number.
+        Assert.True(declared > 0,
+            $"No GET requests parsed from {catalog}. Either the catalog is empty, or its format "
+            + "changed and this parser silently matches nothing — in which case every claim below "
+            + "is vacuous.");
+
+        // 2. Nothing vanished between parsing and firing. An accounting identity, not a guess.
+        Assert.True(checkedCount + skipped.Count == declared,
+            $"{catalog} declares {declared} GET request(s); {checkedCount} were fired and "
+            + $"{skipped.Count} skipped, which does not add up. The loop is dropping requests.");
+
+        // 3. Skips are a failure, not a footnote. Skipping is defensible for a request needing a
+        //    value only a human has — but it must be a decision someone makes, not something that
+        //    happens quietly. Silence is how coverage shrinks without anyone noticing.
+        Assert.True(skipped.Count == 0,
+            $"{skipped.Count} catalog GET(s) were skipped for unresolved placeholders:\n  "
+            + string.Join("\n  ", skipped)
+            + "\nGive the placeholder a value this test can supply, or the catalog keeps a corner "
+            + "nothing exercises.");
+
         Assert.True(failures.Count == 0,
             "auditworthy.http documents endpoints that do not resolve:\n  " + string.Join("\n  ", failures));
     }
