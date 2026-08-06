@@ -119,7 +119,25 @@ if (!FIXTURE || RUNS_FIXTURE) {
 function evaluate(pr) {
   const fail = [];
   const labels = (pr.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name).toLowerCase());
-  const checks = pr.statusCheckRollup ?? [];
+  // GitHub's rollup keeps EVERY check run for the head commit, including superseded ones — a check
+  // that failed and was then re-run green appears TWICE. Filtering the raw list therefore makes a
+  // stale FAILURE permanent: a pull request that ever went red could never merge again however
+  // green it became, and the queue stops with a reason that reads like a real failure.
+  //
+  // Observed, not theorised: after a PR body edit re-triggered `Agent gates`, the rollup held
+  //   PR gates | FAILURE | 01:29:48
+  //   PR gates | SUCCESS | 01:31:56
+  // and `gh pr checks` reported pass while this gate reported "PR gates not passing".
+  //
+  // Take the latest run per check name — exactly the rule `brokenWorkflows` already applies to the
+  // default branch below. The two are the same problem seen from two sides.
+  const latestByName = new Map();
+  for (const c of pr.statusCheckRollup ?? []) {
+    const name = c.name || c.context || '';
+    const prev = latestByName.get(name);
+    if (!prev || (c.startedAt ?? '') >= (prev.startedAt ?? '')) latestByName.set(name, c);
+  }
+  const checks = [...latestByName.values()];
   const files = (pr.files ?? []).map((f) => f.path ?? f.filename ?? '');
 
   const state = (c) => (c.conclusion || c.state || c.status || '').toUpperCase();
