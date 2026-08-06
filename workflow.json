@@ -28,7 +28,9 @@
 
     "//set-by": "A human chose 3 in words on 2026-08-05, having been offered 1 (the recommendation, matching the only PR then blocked) and 2. Recorded here because that is the fact a future tick needs and the conversation is gone.",
 
-    "//what-3-means-here": "merge-gate.mjs stops enforcing a change class, so any PR carrying `agent:approved` with green checks merges — feature code included. The remaining brakes are: pr-gates.mjs demands `human-approved` on any diff touching .github/, CODEOWNERS, nuget.config or appsettings; branch protection requires `PR gates` and `build` to pass; and nothing in this repo produces `agent:approved` except /plenipo:ship run by hand, so a human still starts every merge. Do not weaken those while this number is 3 — together they are the whole safety argument.",
+    "//what-3-means-here": "merge-gate.mjs stops enforcing a change class, so any PR carrying `agent:approved` with green checks merges — feature code included. The remaining brakes are: pr-gates.mjs demands `human-approved` on any diff touching .github/, CODEOWNERS, nuget.config or appsettings; branch protection requires `PR gates` and `build` to pass. Do not weaken those while this number is 3 — together they are the whole safety argument.",
+
+    "//no-longer-true": "This block used to end '...and nothing in this repo produces `agent:approved` except /plenipo:ship run by hand, so a human still starts every merge.' That stopped being true on 2026-08-06, when pr-approval-verdict.md was installed. A cloud agent now applies that label on every pull request, so NO human is required to start a merge here any more. The brakes listed above are the whole of what remains.",
 
     "level": 3,
     "maxOpenPRs": 3,
