@@ -120,7 +120,11 @@ X-Dev-Roles: {{roles}}
 
 @approvalId = 00000000-0000-0000-0000-000000000000
 
-### Approve → the call runs. Returns status "Executed" and the tool's own return value in `result`.
+### Approve → the call RUNS, and resolves to whatever it actually did. A tool that succeeds returns
+### status "Executed" with its return value in `result`. Under the Mock provider the status argument
+### is always "example", so this returns 422 with the tool's validation message and resolves
+### `Failed` — expected, not a defect (#29). There is no way to send valid arguments: approve takes
+### no request body.
 POST {{base}}/api/chat/approvals/{{approvalId}}/approve
 X-Dev-Subject: {{subject}}
 X-Dev-Tenant: {{tenant}}

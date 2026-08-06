@@ -61,8 +61,26 @@ public sealed class ChatAndApprovalTests(IntegrationFixture fixture)
             "A pending approval with no arguments cannot be reviewed by a human.");
     }
 
+    /// <summary>
+    /// Approving runs the call and resolves it, whatever the outcome.
+    /// </summary>
+    /// <remarks>
+    /// <b>This test previously asserted <c>200 OK</c> and <c>status == "Executed"</c>, and those two
+    /// assertions were removed deliberately — they encoded the defect in #29 rather than any
+    /// requirement.</b> The Mock provider always sends an invalid status, so the call this test
+    /// approves has never once applied a change; it only *looked* successful because the tool
+    /// returned its validation failure as an ordinary string. Keeping those assertions would mean
+    /// pinning the product to reporting failed writes as successes, which is precisely the reward
+    /// hack the loop is supposed to refuse.
+    /// <para>
+    /// What survives is this test's one durable claim: approving must not leave the call parked.
+    /// The outcome semantics moved to <see cref="Approving_a_write_that_cannot_be_applied_does_not_report_success"/>,
+    /// and the happy path — a valid status actually changing the row — is proven in
+    /// <c>ProposeControlChangeTests</c>, which is the only rung that can supply valid arguments.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public async Task Approving_executes_the_call_and_clears_it_from_the_queue()
+    public async Task Approving_runs_the_call_and_clears_it_from_the_queue()
     {
         using var client = fixture.AdminClient();
         var turn = await AguiStream.PostAsync(client, Module, WritePrompt);
@@ -70,12 +88,67 @@ public sealed class ChatAndApprovalTests(IntegrationFixture fixture)
 
         var response = await client.PostAsync($"/api/chat/approvals/{id}/approve", null);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var resolved = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
-        Assert.Equal("Executed", resolved.GetProperty("status").GetString());
+        // The tool really ran: the response carries the tool's OWN message, which no generic
+        // platform error path could produce.
+        Assert.Contains("is not a valid status", await response.Content.ReadAsStringAsync());
 
         // Nothing may stay parked after it has run, or the owner approves the same write twice.
         Assert.Null(await TryFindApprovalAsync(client, turn.ConversationId));
+    }
+
+    /// <summary>
+    /// An approved write that cannot be applied must not resolve as if it had been.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The tool used to *return* its validation failure as an ordinary string, so the platform saw a
+    /// tool that ran to completion: it resolved the approval <c>Executed</c>, wrote "✅ … ran" into
+    /// the transcript and reported <c>error: null</c> — while the control was untouched. An
+    /// accountable owner was told the opposite of what happened, which is the one outcome this
+    /// product exists to prevent. Through <c>AdminClient</c>, because it is a claim about the
+    /// approval lane.
+    /// </para>
+    /// <para>
+    /// <b>The HTTP response is the weaker half of this test.</b> What #29 is actually about is the
+    /// <i>durable</i> record: a response is read once, but `ai-decisions` is what someone reviewing
+    /// the decision later reads, and SECURITY.md makes that trail this product's deliverable rather
+    /// than a safety net. So the load-bearing assertion here is the non-null <c>error</c> on the
+    /// recorded decision, which read <c>null</c> before the fix.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Approving_a_write_that_cannot_be_applied_does_not_report_success()
+    {
+        using var client = fixture.AdminClient();
+        var turn = await AguiStream.PostAsync(client, Module, WritePrompt);
+        var id = (await FindApprovalAsync(client, turn.ConversationId)).GetProperty("id").GetGuid();
+
+        // The Mock provider fills every argument after the first with "example", so the status is
+        // always invalid — which makes this the one failure path reachable end to end today.
+        var response = await client.PostAsync($"/api/chat/approvals/{id}/approve", null);
+
+        Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.DoesNotContain("\"status\":\"Executed\"", await response.Content.ReadAsStringAsync());
+
+        // The durable record must not say the approved action succeeded. This is the assertion that
+        // goes red on the unfixed code, where `error` was null.
+        var decisions = JsonDocument.Parse(
+            await client.GetStringAsync("/api/platform/ai-decisions")).RootElement;
+
+        var decision = decisions.EnumerateArray()
+            .FirstOrDefault(d => d.TryGetProperty("id", out var did)
+                              && did.GetString() == id.ToString());
+
+        Assert.True(decision.ValueKind == JsonValueKind.Object,
+            $"No ai-decisions entry recorded for approval {id} — the decision left no durable trace at all.");
+
+        var hasError = decision.TryGetProperty("error", out var error)
+                       && error.ValueKind != JsonValueKind.Null
+                       && !string.IsNullOrWhiteSpace(error.GetString());
+
+        Assert.True(hasError,
+            "ai-decisions recorded the approved write with no error, so the durable record still "
+            + "claims an action succeeded that never applied — the defect in #29.");
     }
 
     [Fact]
