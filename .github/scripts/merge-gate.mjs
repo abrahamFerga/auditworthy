@@ -38,6 +38,14 @@ const gh = (args) => {
   return r.stdout;
 };
 
+// Same call, but a failure is reported instead of thrown. Used only AFTER a merge has already
+// landed: at that point throwing would fail the run and skip every remaining pull request over
+// something that is bookkeeping, not safety.
+const ghSoft = (args) => {
+  const r = spawnSync('gh', args, { encoding: 'utf8', shell: process.platform === 'win32' });
+  return { ok: r.status === 0, out: (r.stderr || r.stdout || '').trim().split('\n')[0] ?? '' };
+};
+
 // ── Policy, read from the repo — never inferred ───────────────────────────────
 // An agent that decides it has earned autonomy is the self-approving loop wearing a different hat.
 // Absent config means level 0: review and label, merge nothing.
@@ -63,6 +71,9 @@ const SURFACE_RE = /^\s*(?:public[- ])?surface:\s*(additive|breaking|none)\b/im;
 const PR_FIELDS = [
   'number', 'title', 'body', 'isDraft', 'headRefName', 'baseRefName', 'labels',
   'mergeable', 'mergeStateStatus', 'reviewDecision', 'statusCheckRollup', 'files', 'author',
+  // Read rather than parsed out of the body: this is the link GitHub itself acts on, so it also
+  // covers an issue attached through the Development sidebar with no keyword in the text.
+  'closingIssuesReferences',
 ].join(',');
 
 // ── Load the pull requests ───────────────────────────────────────────────────
@@ -119,7 +130,55 @@ if (!FIXTURE || RUNS_FIXTURE) {
 function evaluate(pr) {
   const fail = [];
   const labels = (pr.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name).toLowerCase());
-  const checks = pr.statusCheckRollup ?? [];
+  // GitHub's rollup keeps EVERY check run for the head commit, including superseded ones — a check
+  // that failed and was then re-run green appears TWICE. Filtering the raw list makes a stale
+  // FAILURE permanent: a pull request that ever went red could never merge again however green it
+  // became, and the queue stops with a reason that reads like a real failure.
+  //
+  // Observed, not theorised: after a PR body edit re-triggered `Agent gates`, the rollup held
+  //   PR gates | FAILURE | 01:29:48
+  //   PR gates | SUCCESS | 01:31:56
+  // and `gh pr checks` reported pass while this gate reported "PR gates not passing".
+  //
+  // EVERY rule below biases toward blocking, because the two failure directions are not
+  // symmetrical: refusing a mergeable PR wastes a tick, while merging on a superseded green is
+  // unrecoverable. An earlier version of this collapsed to "latest by startedAt", which merged a PR
+  // whose re-run was still QUEUED — the queued entry has no timestamp, lost the comparison, and was
+  // dropped. That sequence is routine here by design: `agent-gates.yml` re-triggers on `labeled`,
+  // ship adds `agent:approved`, and the merge cron fires minutes later.
+  //
+  // NOTE: this is deliberately NOT the same rule as `brokenWorkflows` below, despite operating on
+  // the same idea. That one keys on the WORKFLOW name, takes the first entry trusting `gh run list`
+  // to be newest-first, and excludes `cancelled`. This keys on workflow+job (two workflows may both
+  // define `build`), cannot trust rollup ordering (observed: the earliest-started entry appearing
+  // last), and treats `cancelled` as broken.
+  const groups = new Map();
+  for (const c of pr.statusCheckRollup ?? []) {
+    // Job name alone collides across workflows; qualify it.
+    const key = `${c.workflowName ?? ''}/${c.name || c.context || ''}`;
+    (groups.get(key) ?? groups.set(key, []).get(key)).push(c);
+  }
+
+  const terminal = (c) => (c.conclusion || c.state || c.status || '').toUpperCase();
+  const isPending = (c) => ['PENDING', 'IN_PROGRESS', 'QUEUED', 'WAITING', ''].includes(terminal(c));
+  // StatusContext entries carry no startedAt at all; legacy commit statuses only have createdAt.
+  const when = (c) => c.completedAt ?? c.startedAt ?? c.createdAt ?? '';
+
+  const checks = [...groups.values()].map((runs) => {
+    // A re-run in flight means the verdict is not settled, whatever an older run concluded. Report
+    // the pending one so `checks_green` says "still running" rather than merging on stale green.
+    const inFlight = runs.find(isPending);
+    if (inFlight) return inFlight;
+
+    // Latest terminal run wins; on a tie — same-second timestamps are common, one event triggering
+    // several runs — prefer the non-SUCCESS, so an ambiguous pair never resolves to "mergeable".
+    return runs.reduce((best, c) => {
+      if (when(c) > when(best)) return c;
+      if (when(c) < when(best)) return best;
+      return terminal(best) === 'SUCCESS' ? c : best;
+    });
+  });
+
   const files = (pr.files ?? []).map((f) => f.path ?? f.filename ?? '');
 
   const state = (c) => (c.conclusion || c.state || c.status || '').toUpperCase();
@@ -190,23 +249,61 @@ function evaluate(pr) {
 
 const results = prs.map(evaluate).sort((a, b) => a.pr.number - b.pr.number);
 
+// ── Close what the merge was supposed to close ───────────────────────────────
+// GitHub auto-closes a linked issue AS THE MERGING ACTOR. `agent-merge.yml` merges with
+// `GITHUB_TOKEN`, so without `issues: write` that close is silently dropped: the pull request
+// closes, the issue stays open, and the board never drains.
+//
+// Observed on networthy over eight days, matched pairs differing only in who merged — every merge
+// by a user token closed its issue on the merge timestamp; every `github-actions[bot]` merge left
+// it open (#180 → #150 never closed at all; #177 → #172 and #171 → #149 were closed by hand hours
+// later). An unattended loop then re-reads a board still advertising work that is already merged.
+//
+// The permission is granted now, but relying on the implicit behaviour is exactly what failed
+// quietly for a week — so close them here, where the run log says whether it happened.
+const linkedIssues = (pr) =>
+  (pr.closingIssuesReferences ?? []).map((i) => i?.number).filter((n) => Number.isInteger(n));
+
+function closeLinkedIssues(pr) {
+  for (const n of linkedIssues(pr)) {
+    const { ok, out } = ghSoft(['issue', 'close', String(n), '--reason', 'completed',
+      '--comment', `Closed by #${pr.number}.`]);
+    // An issue already closed — by the implicit behaviour, or by a human ahead of the tick — is
+    // the goal state, not a failure. Report either way; never let bookkeeping stop the loop.
+    console.log(ok ? `         closed #${n}` : `         WARN could not close #${n}: ${out}`);
+  }
+}
+
 // ── Report, then act ─────────────────────────────────────────────────────────
 console.log(`autonomy level ${LEVEL} · ${results.length} open PR(s) · cap ${MAX_MERGES}/run\n`);
 
 let merged = 0;
 for (const { pr, fail, changeClass } of results) {
+  // Printed for every pull request, on the dry run too, so "this will close nothing" is visible
+  // BEFORE the merge rather than inferred from a board that stopped draining. Deliberately not a
+  // gate: a `chore/` PR with no issue behind it is legitimate, and a gate that blocks on the
+  // absence of a link would stall the queue on exactly the PRs nobody filed an issue for.
+  const closes = linkedIssues(pr);
+  const closesNote = closes.length
+    ? `closes ${closes.map((n) => `#${n}`).join(', ')}`
+    : 'closes nothing — no issue is linked to this pull request';
+
   if (fail.length === 0) {
     if (!DO_MERGE) {
       console.log(`  READY  #${pr.number} ${pr.title} [${changeClass}]`);
+      console.log(`         ${closesNote}`);
     } else if (merged >= MAX_MERGES) {
       console.log(`  HELD   #${pr.number} — under_cap: ${MAX_MERGES} already merged this run`);
     } else {
       gh(['pr', 'merge', String(pr.number), '--squash', '--delete-branch']);
       merged++;
       console.log(`  MERGED #${pr.number} ${pr.title} [${changeClass}]`);
+      console.log(`         ${closesNote}`);
+      closeLinkedIssues(pr);
     }
   } else {
     console.log(`  BLOCK  #${pr.number} ${pr.title} [${changeClass}]`);
+    console.log(`         ${closesNote}`);
     for (const f of fail) console.log(`         - ${f}`);
   }
 }
