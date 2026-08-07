@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using Xunit;
 
@@ -23,16 +24,38 @@ namespace Auditworthy.IntegrationTests;
 [Collection("api")]
 public sealed class RequestCatalogTests(IntegrationFixture fixture)
 {
+    /// <summary>
+    /// How many GET requests <c>auditworthy.http</c> held when this guard was last reviewed.
+    /// Deliberately a committed number: it is the only thing here that a deleted request cannot
+    /// move, because every count taken from the file moves with the file. Update it in the same
+    /// commit that changes the catalog.
+    /// </summary>
+    private const int KnownCatalogGets = 15;
+
     [Fact]
     public async Task Every_GET_in_the_committed_catalog_resolves()
     {
         var catalog = FindRepoFile("auditworthy.http");
         using var client = fixture.AdminClient();
 
-        var failures = new List<string>();
-        var checked_ = 0;
+        var lines = await File.ReadAllLinesAsync(catalog);
 
-        foreach (var raw in await File.ReadAllLinesAsync(catalog))
+        // What the loop is about to walk, counted with the loop's own predicate.
+        var declared = lines.Count(l => l.TrimStart().StartsWith("GET ", StringComparison.Ordinal));
+
+        // A SECOND count, taken with a deliberately looser and independent predicate: any leading
+        // whitespace, a lowercase verb, a tab instead of a space. Two counts derived from the same
+        // rule cannot cross-check each other — `declared` shares the loop's predicate, so both drop
+        // to zero together the moment the catalog's format drifts, and an equality between them
+        // asserts nothing. This one keeps matching where the strict parser has stopped, so the
+        // disagreement is what surfaces the regression.
+        var looselyDeclared = lines.Count(LooksLikeGetLine);
+
+        var failures = new List<string>();
+        var skipped = new List<string>();
+        var checkedCount = 0;
+
+        foreach (var raw in lines)
         {
             var line = raw.Trim();
             if (!line.StartsWith("GET ", StringComparison.Ordinal))
@@ -47,14 +70,17 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
                 .Replace("{{module}}", "compliance", StringComparison.Ordinal);
 
             // An unresolved placeholder means the request needs a value a human pastes in (an id
-            // from a previous response). Those cannot be fired blind, and skipping them is not a
-            // gap this test is hiding — no GET in the catalog uses one today.
+            // from a previous response), and cannot be fired blind. Recorded rather than silently
+            // dropped: skipping is a legitimate answer, but a *silent* skip lets coverage shrink
+            // without anyone noticing — the day someone adds `GET {{base}}/api/jobs/{{jobId}}`, the
+            // catalog grows an untested corner and the guard still says everything resolves.
             if (url.Contains("{{", StringComparison.Ordinal))
             {
+                skipped.Add(url);
                 continue;
             }
 
-            checked_++;
+            checkedCount++;
             var response = await client.GetAsync(url);
 
             // 404 = the route does not exist. 405 = it exists under a different verb. Both mean the
@@ -66,9 +92,72 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
             }
         }
 
-        Assert.True(checked_ > 5, $"Only {checked_} GET requests found in {catalog} — the parser is broken, not the catalog.");
+        // Separate claims, because they fail for different reasons and a combined assertion would
+        // report the wrong one.
+
+        // 1. What this guard primarily exists to produce: the endpoints the catalog documents and
+        //    the API does not serve. Reported FIRST so a routine, explicitly anticipated event
+        //    lower down — someone adding a parameterized GET, which trips claim 5 — cannot mask it.
         Assert.True(failures.Count == 0,
             "auditworthy.http documents endpoints that do not resolve:\n  " + string.Join("\n  ", failures));
+
+        // 2. The strict parser has not silently stopped matching. Two independent predicates over
+        //    the same file: they agree today at 15, and they disagree the moment a line is written
+        //    as `get `, or with a tab, or indented — all of which the loop would skip in silence
+        //    while every count derived from its own rule agreed with it.
+        //
+        //    Checked BEFORE the pinned count below, and the order carries information: a format
+        //    drift drops `declared` too, so the pinned count would also fire — but it would report
+        //    a deletion, which is the wrong diagnosis. Whichever assertion fires first is the one a
+        //    reader believes, so the more specific claim goes first.
+        Assert.True(declared == looselyDeclared,
+            $"{catalog}: the strict parser matched {declared} GET line(s), a looser one matched "
+            + $"{looselyDeclared}. The catalog's format has drifted away from what this test "
+            + "parses, so the lines in the gap are documented but never fired.");
+
+        // 3. Coverage did not shrink. No count taken from the file can catch a DELETED request:
+        //    `declared`, `looselyDeclared` and the loop all fall together when a GET is removed,
+        //    which is why the previous `declared > 0` was strictly weaker than the `checked_ > 5`
+        //    it replaced — under it, fourteen of fifteen could vanish and this still passed. Only a
+        //    number committed alongside the catalog holds that line, so here it is. It is checked
+        //    for equality, not as a floor: growth has to be acknowledged too, or the constant drifts
+        //    upward unnoticed and the next deletion lands back below it undetected.
+        Assert.True(declared == KnownCatalogGets,
+            $"{catalog} holds {declared} GET request(s); this guard was written against "
+            + $"{KnownCatalogGets}. If you added or removed requests deliberately, update "
+            + $"{nameof(KnownCatalogGets)} in the same commit — that edit is the record of the "
+            + "decision. If you did not, the catalog lost coverage and this is the only check "
+            + "that can tell.");
+
+        // 4. Nothing vanished between parsing and firing. An accounting identity, not a guess.
+        Assert.True(checkedCount + skipped.Count == declared,
+            $"{catalog} declares {declared} GET request(s); {checkedCount} were fired and "
+            + $"{skipped.Count} skipped, which does not add up. The loop is dropping requests.");
+
+        // 5. Skips are a failure, not a footnote. Skipping is defensible for a request needing a
+        //    value only a human has — but it must be a decision someone makes, not something that
+        //    happens quietly. Silence is how coverage shrinks without anyone noticing.
+        Assert.True(skipped.Count == 0,
+            $"{skipped.Count} catalog GET(s) were skipped for unresolved placeholders:\n  "
+            + string.Join("\n  ", skipped)
+            + "\nGive the placeholder a value this test can supply, or the catalog keeps a corner "
+            + "nothing exercises.");
+    }
+
+    /// <summary>
+    /// A looser reading of "this line is a GET" than the loop uses, on purpose: leading whitespace,
+    /// any casing, and a tab rather than a space all count. Every line the strict parser matches is
+    /// also matched here, so the two counts can only diverge in one direction — lines the catalog
+    /// intends as requests and the loop silently walks past.
+    /// </summary>
+    private static bool LooksLikeGetLine(string line)
+    {
+        var trimmed = line.TrimStart();
+
+        return trimmed.Length > 4
+            && trimmed.StartsWith("get", StringComparison.OrdinalIgnoreCase)
+            && char.IsWhiteSpace(trimmed[3])
+            && trimmed[4..].TrimStart().Length > 0;
     }
 
     /// <summary>Walks up from the test assembly to the repo root, which has no fixed depth in CI.</summary>
