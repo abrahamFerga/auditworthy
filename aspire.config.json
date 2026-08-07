@@ -1,0 +1,5 @@
+{
+  "appHost": {
+    "path": "src/Auditworthy.AppHost/Auditworthy.AppHost.csproj"
+  }
+}

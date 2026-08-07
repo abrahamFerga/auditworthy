@@ -41,6 +41,25 @@ var redis = builder.AddRedis("plenipo-redis");
 // real provider credentials are configured per tenant under Admin → AI Settings and stored
 // write-only in Plenipo's secret vault. There is no deployment-level key slot by design.
 builder.AddProject<Projects.Auditworthy_Host>("auditworthy-api")
+    // Development, explicitly, and this is load-bearing.
+    //
+    // Aspire does NOT hand a project resource the AppHost's own environment, and neither project
+    // has a launchSettings.json, so without this line the API starts in **Production**. The
+    // platform then refuses to boot: the X-Dev-* dev-auth fallback is Development-only, and no
+    // "Auth" section (Entra External ID Authority/Audience) is configured here — by design, since
+    // this stack runs keyless. AddPlenipoPlatform() throws, and the failure is silent in the worst
+    // way: containers go healthy, the banner prints "Distributed application started", and the API
+    // resource goes Starting -> Running -> Finished in about three seconds. Project logs go to the
+    // dashboard, not to the console you launched from, so nothing appears to be wrong.
+    //
+    // Exporting ASPNETCORE_ENVIRONMENT before `dotnet run` does not fix it — verified, not assumed.
+    // The AppHost has to hand the value to the resource, which is what this does.
+    //
+    // This is NOT a weakening of the platform's guard. Refusing dev-auth outside Development is
+    // correct and stays correct; this file is the *local* orchestrator (workflow.json: "cloud":
+    // "none"), so declaring it a Development environment is a true statement, not an exemption.
+    // Nothing deployed anywhere runs through here. AppHostCompositionTests asserts this line.
+    .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
     .WithReference(platformDb)
     .WithReference(auditDb)
     .WithReference(redis)
