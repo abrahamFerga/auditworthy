@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The AppHost composition guard. It builds the distributed application MODEL and asserts on it;
+       it never calls StartAsync, so it needs no Docker and no containers, and runs everywhere the
+       module guard does. The failure it exists to catch is silent in exactly the way a manifest gap
+       is: the AppHost composes cleanly, `dotnet build` is green, the banner says the application
+       started, and the API resource dies three seconds later in a log the launching console never
+       shows. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.Testing" Version="13.4.6" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- IsAspireProjectResource=false: this references the AppHost to inspect it, not to be
+         orchestrated by it. Without the attribute the reference is treated as a resource and the
+         generated metadata this test binds to is not produced. -->
+    <ProjectReference Include="..\..\src\Auditworthy.AppHost\Auditworthy.AppHost.csproj"
+                      IsAspireProjectResource="false" />
+  </ItemGroup>
+
+</Project>
