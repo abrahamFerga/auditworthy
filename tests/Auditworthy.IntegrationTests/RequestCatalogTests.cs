@@ -24,6 +24,14 @@ namespace Auditworthy.IntegrationTests;
 [Collection("api")]
 public sealed class RequestCatalogTests(IntegrationFixture fixture)
 {
+    /// <summary>
+    /// How many GET requests <c>auditworthy.http</c> held when this guard was last reviewed.
+    /// Deliberately a committed number: it is the only thing here that a deleted request cannot
+    /// move, because every count taken from the file moves with the file. Update it in the same
+    /// commit that changes the catalog.
+    /// </summary>
+    private const int KnownCatalogGets = 15;
+
     [Fact]
     public async Task Every_GET_in_the_committed_catalog_resolves()
     {
@@ -32,12 +40,16 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
 
         var lines = await File.ReadAllLinesAsync(catalog);
 
-        // Derived from the file, never hardcoded. The previous `> 5` was a guess against a catalog
-        // that actually holds 15 GETs, so ten could have vanished — through a format change the
-        // parser stopped matching, or requests being deleted — while the guard still reported
-        // success over a third of its claimed coverage. A floor that does not track the file is a
-        // floor that stops meaning anything the first time the file grows.
+        // What the loop is about to walk, counted with the loop's own predicate.
         var declared = lines.Count(l => l.TrimStart().StartsWith("GET ", StringComparison.Ordinal));
+
+        // A SECOND count, taken with a deliberately looser and independent predicate: any leading
+        // whitespace, a lowercase verb, a tab instead of a space. Two counts derived from the same
+        // rule cannot cross-check each other — `declared` shares the loop's predicate, so both drop
+        // to zero together the moment the catalog's format drifts, and an equality between them
+        // asserts nothing. This one keeps matching where the strict parser has stopped, so the
+        // disagreement is what surfaces the regression.
+        var looselyDeclared = lines.Count(LooksLikeGetLine);
 
         var failures = new List<string>();
         var skipped = new List<string>();
@@ -83,29 +95,46 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
         // Separate claims, because they fail for different reasons and a combined assertion would
         // report the wrong one.
 
-        // 0. What this guard primarily exists to produce: the endpoints the catalog documents and
-        //    the API does not serve. Reported FIRST. The old first assertion only fired in a
-        //    catastrophic state, but the skip check below fires on the routine and explicitly
-        //    anticipated event of someone adding a parameterized GET — and when it did, it masked
-        //    the 404 report this guard is for. Whichever assertion fires first is the one a reader
-        //    believes.
+        // 1. What this guard primarily exists to produce: the endpoints the catalog documents and
+        //    the API does not serve. Reported FIRST so a routine, explicitly anticipated event
+        //    lower down — someone adding a parameterized GET, which trips claim 5 — cannot mask it.
         Assert.True(failures.Count == 0,
             "auditworthy.http documents endpoints that do not resolve:\n  " + string.Join("\n  ", failures));
 
-        // 1. The parser still matches something at all. `declared` and the loop share a predicate,
-        //    so they cannot diverge — which means equality alone can NEVER catch a format change
-        //    that stops both matching. Only a nonzero check can, and it needs no maintained number.
-        Assert.True(declared > 0,
-            $"No GET requests parsed from {catalog}. Either the catalog is empty, or its format "
-            + "changed and this parser silently matches nothing — in which case every claim below "
-            + "is vacuous.");
+        // 2. The strict parser has not silently stopped matching. Two independent predicates over
+        //    the same file: they agree today at 15, and they disagree the moment a line is written
+        //    as `get `, or with a tab, or indented — all of which the loop would skip in silence
+        //    while every count derived from its own rule agreed with it.
+        //
+        //    Checked BEFORE the pinned count below, and the order carries information: a format
+        //    drift drops `declared` too, so the pinned count would also fire — but it would report
+        //    a deletion, which is the wrong diagnosis. Whichever assertion fires first is the one a
+        //    reader believes, so the more specific claim goes first.
+        Assert.True(declared == looselyDeclared,
+            $"{catalog}: the strict parser matched {declared} GET line(s), a looser one matched "
+            + $"{looselyDeclared}. The catalog's format has drifted away from what this test "
+            + "parses, so the lines in the gap are documented but never fired.");
 
-        // 2. Nothing vanished between parsing and firing. An accounting identity, not a guess.
+        // 3. Coverage did not shrink. No count taken from the file can catch a DELETED request:
+        //    `declared`, `looselyDeclared` and the loop all fall together when a GET is removed,
+        //    which is why the previous `declared > 0` was strictly weaker than the `checked_ > 5`
+        //    it replaced — under it, fourteen of fifteen could vanish and this still passed. Only a
+        //    number committed alongside the catalog holds that line, so here it is. It is checked
+        //    for equality, not as a floor: growth has to be acknowledged too, or the constant drifts
+        //    upward unnoticed and the next deletion lands back below it undetected.
+        Assert.True(declared == KnownCatalogGets,
+            $"{catalog} holds {declared} GET request(s); this guard was written against "
+            + $"{KnownCatalogGets}. If you added or removed requests deliberately, update "
+            + $"{nameof(KnownCatalogGets)} in the same commit — that edit is the record of the "
+            + "decision. If you did not, the catalog lost coverage and this is the only check "
+            + "that can tell.");
+
+        // 4. Nothing vanished between parsing and firing. An accounting identity, not a guess.
         Assert.True(checkedCount + skipped.Count == declared,
             $"{catalog} declares {declared} GET request(s); {checkedCount} were fired and "
             + $"{skipped.Count} skipped, which does not add up. The loop is dropping requests.");
 
-        // 3. Skips are a failure, not a footnote. Skipping is defensible for a request needing a
+        // 5. Skips are a failure, not a footnote. Skipping is defensible for a request needing a
         //    value only a human has — but it must be a decision someone makes, not something that
         //    happens quietly. Silence is how coverage shrinks without anyone noticing.
         Assert.True(skipped.Count == 0,
@@ -113,6 +142,22 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
             + string.Join("\n  ", skipped)
             + "\nGive the placeholder a value this test can supply, or the catalog keeps a corner "
             + "nothing exercises.");
+    }
+
+    /// <summary>
+    /// A looser reading of "this line is a GET" than the loop uses, on purpose: leading whitespace,
+    /// any casing, and a tab rather than a space all count. Every line the strict parser matches is
+    /// also matched here, so the two counts can only diverge in one direction — lines the catalog
+    /// intends as requests and the loop silently walks past.
+    /// </summary>
+    private static bool LooksLikeGetLine(string line)
+    {
+        var trimmed = line.TrimStart();
+
+        return trimmed.Length > 4
+            && trimmed.StartsWith("get", StringComparison.OrdinalIgnoreCase)
+            && char.IsWhiteSpace(trimmed[3])
+            && trimmed[4..].TrimStart().Length > 0;
     }
 
     /// <summary>Walks up from the test assembly to the repo root, which has no fixed depth in CI.</summary>
