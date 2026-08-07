@@ -80,8 +80,17 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
             }
         }
 
-        // Three separate claims, because they fail for different reasons and a combined assertion
-        // would report the wrong one.
+        // Separate claims, because they fail for different reasons and a combined assertion would
+        // report the wrong one.
+
+        // 0. What this guard primarily exists to produce: the endpoints the catalog documents and
+        //    the API does not serve. Reported FIRST. The old first assertion only fired in a
+        //    catastrophic state, but the skip check below fires on the routine and explicitly
+        //    anticipated event of someone adding a parameterized GET — and when it did, it masked
+        //    the 404 report this guard is for. Whichever assertion fires first is the one a reader
+        //    believes.
+        Assert.True(failures.Count == 0,
+            "auditworthy.http documents endpoints that do not resolve:\n  " + string.Join("\n  ", failures));
 
         // 1. The parser still matches something at all. `declared` and the loop share a predicate,
         //    so they cannot diverge — which means equality alone can NEVER catch a format change
@@ -104,9 +113,6 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
             + string.Join("\n  ", skipped)
             + "\nGive the placeholder a value this test can supply, or the catalog keeps a corner "
             + "nothing exercises.");
-
-        Assert.True(failures.Count == 0,
-            "auditworthy.http documents endpoints that do not resolve:\n  " + string.Join("\n  ", failures));
     }
 
     /// <summary>Walks up from the test assembly to the repo root, which has no fixed depth in CI.</summary>
