@@ -60,14 +60,23 @@ launched with `dotnet run` is **invisible to the Aspire MCP** — which is the e
 observability path. If you intend to read logs or traces through tooling rather than eyeballs, use
 `aspire run`. See §5.
 
-**Mode A is slow to first byte and the console lies about it.** Postgres, Redis and the dashboard
-are up within seconds; `auditworthy-api` builds, then waits on the Postgres health check, and took
-**~4 minutes** to appear when this was last measured (2026-08-03, Aspire 13.4.6). Until then the
-banner says *"Distributed application started"* and the API simply is not there. Do not conclude the
-stack is broken before four minutes have passed — and do not go looking for the API's output in the
-AppHost's stdout, because Aspire routes project logs to the **dashboard**, not the console you
-launched from. **If you need a running instance right now, use Mode B**: the same host, booting in
-seconds, and it is what the assertions in §4 were verified against.
+**`auditworthy-api` answers `/alive` about 12 seconds after launch** — measured 2026-08-07 on a
+warm build with an existing data volume (Aspire 13.4.6). A cold first run is longer, because the
+build and the Postgres first-init are real work.
+
+**If it is not there after a minute, look — do not wait.** This paragraph used to say the API took
+"~4 minutes" and told you not to conclude anything before four minutes had passed. That advice was
+measured against a stack that was **never going to start at all** (#54: the API crashed on startup
+in about three seconds), and it cost every reader four minutes before they discovered there was
+nothing to wait for. A dead API and a slow one look identical from the launching console, so the
+guidance has to be *where to look*, not *how long to wait*:
+
+- Project logs go to the **dashboard**, never to the console you launched from — open
+  `/consolelogs/resource/auditworthy-api`. The banner *"Distributed application started"* describes
+  the AppHost, and says nothing whatsoever about the API.
+- Faster still: reproduce the same boot in seconds with **Mode B**, which puts the exception on
+  stderr where you already are.
+- The API's captured stderr is on disk regardless: the newest `%TEMP%\aspire-dcp*\<guid>_err`.
 
 To pin the dashboard to a known URL instead of a random port (this is what `.claude/launch.json`
 does), pass it through — and it must be **https**, or Aspire refuses to start:
@@ -392,7 +401,7 @@ that means the diagnosis is wrong, not the fix.
 | `RUN_ERROR "Unknown module"` | module id must be `compliance` |
 | `42P01: relation "platform.background_jobs" does not exist`, endless 500s | `Program.cs` was reduced to `app.UsePlenipoPlatform(); app.Run();`. Only `await app.RunPlenipoPlatformAsync()` also runs `InitializePlenipoAsync`, which applies the migrations. It looks like a job bug; it is a missing migration step |
 | `42P01: relation "compliance.<table>" does not exist` | the module's own schema is never created: `ComplianceModule` must implement `IModule.MigrateAsync` (and `SeedAsync`). The platform migrates *itself* and then calls each module — it cannot invent your DDL |
-| Aspire: containers up, API not there yet, stack "hangs" after the banner | **first give it four minutes** (§2 Mode A). If it is still absent: a stale Postgres **data volume** initialized with a different password (`docker volume rm auditworthy-pg-data`; dev data is throwaway), or someone re-added `WaitFor` on the two **database** resources — wait for the postgres **server**, never the databases, or the wait is circular |
+| Aspire: containers up, API not there yet, stack "hangs" after the banner | **read the API's log, don't wait it out** (§2 Mode A) — the dashboard's `/consolelogs/resource/auditworthy-api`, or the newest `%TEMP%\aspire-dcp*\<guid>_err`. Then: someone removed the `.WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")` the AppHost applies **inside its `if (builder.ExecutionContext.IsRunMode)` block**, so the API starts in Production and `AddPlenipoPlatform()` throws on dev-auth (#54 — `AppHostCompositionTests` fails for this). Exporting the variable in your own shell will **not** rescue it: Aspire does not propagate the AppHost's process environment to a project resource, measured 2026-08-08. Equally, do not "fix" a publish-mode complaint by unwrapping that `if` — the guard is deliberate and its own test asserts the key is absent under a publish operation; a stale Postgres **data volume** initialized with a different password (`docker volume rm auditworthy-pg-data`; dev data is throwaway); or someone re-added `WaitFor` on the two **database** resources — wait for the postgres **server**, never the databases, or the wait is circular |
 | Aspire: `auditworthy-api` appears and then exits, with nothing in the AppHost console | project logs go to the **dashboard**, not to the terminal you launched from — open `/consolelogs/resource/auditworthy-api`, or relaunch with `aspire run` and read them through the MCP. Reproduce the same boot in seconds with Mode B, which shows the exception on stderr |
 | Aspire refuses to start: *"the 'applicationUrl' setting must be an https address"* | you pinned the dashboard with an `http` URL. Use `--ASPNETCORE_URLS=https://localhost:18888` |
 | Postgres data corrupted / ghost rows after running two AppHosts | both mounted the same data volume; the second cleared the first's `postmaster.pid` as stale. Host port 15433 is pinned so the second run now fails fast at bind time — **don't unpin it**, and never move it to 15432 (that is Networthy's) |
