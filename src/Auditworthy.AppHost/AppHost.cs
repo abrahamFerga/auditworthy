@@ -40,26 +40,7 @@ var redis = builder.AddRedis("plenipo-redis");
 // Deployment AI defaults live in the Host's appsettings (Development = Mock, Production = None);
 // real provider credentials are configured per tenant under Admin → AI Settings and stored
 // write-only in Plenipo's secret vault. There is no deployment-level key slot by design.
-builder.AddProject<Projects.Auditworthy_Host>("auditworthy-api")
-    // Development, explicitly, and this is load-bearing.
-    //
-    // Aspire does NOT hand a project resource the AppHost's own environment, and neither project
-    // has a launchSettings.json, so without this line the API starts in **Production**. The
-    // platform then refuses to boot: the X-Dev-* dev-auth fallback is Development-only, and no
-    // "Auth" section (Entra External ID Authority/Audience) is configured here — by design, since
-    // this stack runs keyless. AddPlenipoPlatform() throws, and the failure is silent in the worst
-    // way: containers go healthy, the banner prints "Distributed application started", and the API
-    // resource goes Starting -> Running -> Finished in about three seconds. Project logs go to the
-    // dashboard, not to the console you launched from, so nothing appears to be wrong.
-    //
-    // Exporting ASPNETCORE_ENVIRONMENT before `dotnet run` does not fix it — verified, not assumed.
-    // The AppHost has to hand the value to the resource, which is what this does.
-    //
-    // This is NOT a weakening of the platform's guard. Refusing dev-auth outside Development is
-    // correct and stays correct; this file is the *local* orchestrator (workflow.json: "cloud":
-    // "none"), so declaring it a Development environment is a true statement, not an exemption.
-    // Nothing deployed anywhere runs through here. AppHostCompositionTests asserts this line.
-    .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
+var api = builder.AddProject<Projects.Auditworthy_Host>("auditworthy-api")
     .WithReference(platformDb)
     .WithReference(auditDb)
     .WithReference(redis)
@@ -77,5 +58,42 @@ builder.AddProject<Projects.Auditworthy_Host>("auditworthy-api")
     // connections) with no deadlock. Do not "fix" a slow first boot by putting these back.
     .WaitFor(postgres)
     .WithExternalHttpEndpoints();
+
+// Development, explicitly, for a LOCAL RUN ONLY — and both halves of that are load-bearing.
+//
+// Why it is needed at all: Aspire does NOT hand a project resource the AppHost's own environment,
+// and neither project has a launchSettings.json, so without this the API starts in **Production**.
+// The platform then refuses to boot — the X-Dev-* dev-auth fallback is Development-only, and no
+// "Auth" section (Entra External ID Authority/Audience) is configured here, by design, since this
+// stack runs keyless. AddPlenipoPlatform() throws, and the failure is silent in the worst way:
+// containers go healthy, the banner prints "Distributed application started", and the API resource
+// goes Starting -> Running -> Finished in about three seconds. Project logs go to the dashboard,
+// not to the console you launched from, so nothing appears to be wrong. That was #54.
+//
+// Exporting ASPNETCORE_ENVIRONMENT before `dotnet run` does NOT substitute for this, and that is a
+// runtime observation, not an inference: with this block deleted entirely and the variable exported
+// in the launching shell, the API still died with the same
+// AuthSetup.AddPlenipoAuthentication exception. Aspire does not propagate the AppHost's process
+// environment to a project resource — the AppHost has to hand the value over. (Note that the
+// composition tests below CANNOT establish that: they resolve the *declared* configuration and
+// never start a process, so an inherited environment block could not appear in them either way.)
+//
+// Why it is guarded: in THIS repo the environment name is not a diagnostics convenience, it is the
+// switch that turns on X-Dev-* header impersonation, because the platform's fallback guard is
+// environment.IsDevelopment() and Auth is unconfigured. Applied unconditionally, the annotation
+// would also be emitted for a publish/manifest operation, and a deployed API carrying it would
+// accept any caller's claimed tenant and role. Nothing publishes this AppHost today
+// (workflow.json: "cloud": "none"; no infra/, no azure.yaml, no publish job) — which is precisely
+// why an unconditional version would have survived until the day one of those changed.
+//
+// So this is NOT a weakening of the platform's guard: refusing dev-auth outside Development is
+// correct and stays correct, and this line now says the true, narrow thing — when a human runs the
+// local orchestrator, the local API is a Development one. Do not unwrap the `if`; that turns a
+// structural fact back into a comment. AppHostCompositionTests asserts BOTH directions — present
+// under a run operation, absent under a publish operation.
+if (builder.ExecutionContext.IsRunMode)
+{
+    api.WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development");
+}
 
 builder.Build().Run();
