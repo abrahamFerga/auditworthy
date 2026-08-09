@@ -16,7 +16,9 @@
 # Swap the role to assert a boundary: compliance-reader (reads only), compliance-analyst (may
 # propose, may NOT approve), compliance-owner (may approve), system_admin (holds `*`).
 #
-# @name — send it, and CHANGE IT WHENEVER YOU CHANGE @subject (#64). Dev-auth defaults the name
+# The @name variable below — send it, and CHANGE IT WHENEVER YOU CHANGE @subject (#64). (Spelled
+# out because a line opening with `@name` is REST Client's request-naming directive, which this is
+# not.) Dev-auth defaults the name
 # claim to the constant "Dev User" for EVERY subject, and the platform writes the persisted
 # User.DisplayName from that claim the first time a subject is seen and never again. Drop the
 # header and two different people become one indistinguishable actor in the append-only audit and
