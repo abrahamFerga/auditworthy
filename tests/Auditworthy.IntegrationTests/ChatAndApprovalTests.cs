@@ -1,5 +1,10 @@
 using System.Net;
 using System.Text.Json;
+using Auditworthy.Compliance;
+using Auditworthy.Compliance.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Plenipo.Infrastructure.Persistence;
 using Xunit;
 
 namespace Auditworthy.IntegrationTests;
@@ -206,6 +211,62 @@ public sealed class ChatAndApprovalTests(IntegrationFixture fixture)
         var found = await TryFindApprovalAsync(client, conversationId);
         Assert.NotNull(found);
         return found.Value;
+    }
+
+    /// <summary>
+    /// Approving a write with valid arguments actually commits it — the linkage nothing proved.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the product's central claim end to end: an accountable owner approves, and *then* the
+    /// state changes. Every other test in this file exercises the failure half, because the Mock
+    /// provider always sends <c>status: "example"</c> and <c>POST /api/chat/approvals/{id}/approve</c>
+    /// accepts no request body — so no model-driven path can supply arguments that would commit.
+    /// <c>ProposeControlChangeTests</c> proves the tool commits when invoked *directly*, which says
+    /// nothing about the approval lane because that fixture bypasses it by design.
+    /// </para>
+    /// <para>
+    /// <b>The approval is parked by the real path and approved through the real endpoint.</b> The only
+    /// substitution is the parked <c>ArgumentsJson</c>, rewritten to what a competent model would have
+    /// sent. That keeps everything this issue is about inside the test — the approve endpoint, the
+    /// platform's executor, the tool, and the database write — and fakes only the one thing the Mock
+    /// provider is incapable of producing.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_approved_write_with_valid_arguments_commits_the_change()
+    {
+        using var client = fixture.AdminClient();
+        var turn = await AguiStream.PostAsync(client, Module, WritePrompt);
+        var id = (await FindApprovalAsync(client, turn.ConversationId)).GetProperty("id").GetGuid();
+
+        var (scope, _, _) = await fixture.AuthorizedScopeAsync();
+        using var _scope = scope;
+        var compliance = scope.ServiceProvider.GetRequiredService<ComplianceDbContext>();
+
+        // Target whichever status the control is not currently in, so the assertion cannot pass by
+        // the row already happening to hold the value.
+        var before = await compliance.Controls.AsNoTracking().FirstAsync(c => c.Reference == "A.5.1");
+        var target = before.Status == ControlStatus.Effective
+            ? ControlStatus.Implemented
+            : ControlStatus.Effective;
+
+        var platform = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
+        var parked = await platform.PendingApprovals.FirstAsync(a => a.Id == id);
+        parked.ArgumentsJson =
+            $$"""{"reference":"A.5.1","status":"{{target}}","reason":"Approval-lane regression test"}""";
+        await platform.SaveChangesAsync();
+
+        var response = await client.PostAsync($"/api/chat/approvals/{id}/approve", null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var resolved = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("Executed", resolved.GetProperty("status").GetString());
+
+        // The response is not the evidence — the row is. This is the assertion the product's central
+        // claim rests on, and until now nothing asserted it.
+        var after = await compliance.Controls.AsNoTracking().FirstAsync(c => c.Reference == "A.5.1");
+        Assert.Equal(target, after.Status);
     }
 
     /// <summary>
