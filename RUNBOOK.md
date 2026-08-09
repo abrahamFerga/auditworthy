@@ -131,6 +131,7 @@ Development with no IdP configured uses the dev-auth fallback. Send these on **e
 
 ```http
 X-Dev-Subject: dev-user
+X-Dev-Name:    Dev User
 X-Dev-Tenant:  dev
 X-Dev-Roles:   system_admin
 ```
@@ -139,6 +140,29 @@ X-Dev-Roles:   system_admin
 403 — that is the point of the header being per-request. The three shipped baselines are
 `compliance-reader`, `compliance-analyst` and `compliance-owner`
 (`src/Auditworthy.Host/Program.cs`).
+
+### `X-Dev-Name` is not optional here, and it is first-contact-wins (#64)
+
+Dev-auth defaults the `name` claim to the constant **`Dev User`** for every subject
+(`Plenipo.AspNetCore/Auth/DevAuthenticationHandler.cs:24`, alpha.28 — read from source, not docs).
+The platform writes the persisted `User.DisplayName` **from that claim at JIT provisioning and
+never again**: `RequestEnricher`'s returning-user branch refreshes `LastSeenAt` and nothing else.
+
+Two consequences, and the second is the one that costs an hour:
+
+1. **Omit the header and every subject is one actor.** Two different people become the same name in
+   the append-only audit and in the approvals queue's proposer — the product's central claim,
+   voided by a missing header. Change `X-Dev-Name` whenever you change `X-Dev-Subject`.
+2. **You cannot rename a subject by changing the header.** The row already says `Dev User`, and
+   this product deliberately prefers the persisted record over the claim (`#55`,
+   `src/Auditworthy.Host/Identity/PersistedDisplayNameEnricher.cs`), so the stale name keeps
+   winning. Either use a subject you have never sent before, or recreate the database
+   (`docker volume rm auditworthy-pg-data` in Mode A; the Mode B container is throwaway; the
+   Testcontainers fixture is fresh every run and so is never affected).
+
+The integration fixture derives the name from the subject for you —
+`IntegrationFixture.DevDisplayName`, so `analyst-anna` becomes `Analyst Anna` — and every client it
+hands out carries it.
 
 ## 4. Exercise it
 

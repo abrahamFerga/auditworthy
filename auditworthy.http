@@ -15,7 +15,17 @@
 
 # Swap the role to assert a boundary: compliance-reader (reads only), compliance-analyst (may
 # propose, may NOT approve), compliance-owner (may approve), system_admin (holds `*`).
+#
+# @name — send it, and CHANGE IT WHENEVER YOU CHANGE @subject (#64). Dev-auth defaults the name
+# claim to the constant "Dev User" for EVERY subject, and the platform writes the persisted
+# User.DisplayName from that claim the first time a subject is seen and never again. Drop the
+# header and two different people become one indistinguishable actor in the append-only audit and
+# in the approvals queue — which is the one thing this product exists to make impossible.
+#
+# It is first-contact-wins: once a subject has been provisioned as "Dev User", changing @name will
+# NOT rename it (see RUNBOOK.md §3). Recreate the database, or use a subject you have not used yet.
 @subject = dev-user
+@name    = Dev User
 @tenant  = dev
 @roles   = system_admin
 
@@ -33,12 +43,14 @@ GET {{base}}/health
 ### Modules and the tabs this caller may see. Must contain `compliance` with chat + controls.
 GET {{base}}/api/platform/modules
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
 ### Who the platform thinks you are, and your effective permissions.
 GET {{base}}/api/platform/me
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -48,6 +60,7 @@ X-Dev-Roles: {{roles}}
 ### Requires `compliance.view`.
 GET {{base}}/api/compliance/controls
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -58,6 +71,7 @@ X-Dev-Roles: {{roles}}
 POST {{base}}/api/agui/{{module}}
 Content-Type: application/json
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -71,6 +85,7 @@ X-Dev-Roles: {{roles}}
 POST {{base}}/api/agui/{{module}}
 Content-Type: application/json
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -86,6 +101,7 @@ X-Dev-Roles: {{roles}}
 POST {{base}}/api/agui/{{module}}
 Content-Type: application/json
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -100,6 +116,7 @@ X-Dev-Roles: {{roles}}
 POST {{base}}/api/agui/{{module}}
 Content-Type: application/json
 X-Dev-Subject: it-reader
+X-Dev-Name: It Reader
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: compliance-reader
 
@@ -115,6 +132,7 @@ X-Dev-Roles: compliance-reader
 ### @approvalId below. As compliance-analyst this returns 403, by design.
 GET {{base}}/api/chat/approvals
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -127,12 +145,14 @@ X-Dev-Roles: {{roles}}
 ### no request body.
 POST {{base}}/api/chat/approvals/{{approvalId}}/approve
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
 ### Reject → nothing runs. Returns status "Rejected".
 POST {{base}}/api/chat/approvals/{{approvalId}}/reject
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -140,6 +160,7 @@ X-Dev-Roles: {{roles}}
 ### ─────────────────────────────────────────────────────────────────── conversations ───
 GET {{base}}/api/chat/conversations
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -151,6 +172,7 @@ X-Dev-Roles: {{roles}}
 ### never callable.
 GET {{base}}/api/admin/security/catalog
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -165,30 +187,35 @@ X-Dev-Roles: {{roles}}
 ### the editor, not a reader) and returns 405 for a GET — read the list here instead.
 GET {{base}}/api/admin/roles
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
 ### Users in the tenant.
 GET {{base}}/api/admin/users
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
 ### Append-only: every tool invocation, who ran it, and whether it succeeded.
 GET {{base}}/api/admin/audit/tool-calls
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
 ### Sign-in and permission-denial events.
 GET {{base}}/api/admin/audit/auth-events
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
 ### Token usage — empty until at least one chat turn has run.
 GET {{base}}/api/admin/usage?days=30
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -196,6 +223,7 @@ X-Dev-Roles: {{roles}}
 ### or in any file in this repo.
 GET {{base}}/api/admin/ai-settings
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -204,5 +232,6 @@ X-Dev-Roles: {{roles}}
 ### Empty on this product: the compliance module declares no jobs (PLAN.md §9).
 GET {{base}}/api/jobs/mine
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
