@@ -1,5 +1,7 @@
 using Auditworthy.Compliance;
+using Auditworthy.Host.Authorization;
 using Auditworthy.Host.Identity;
+using Microsoft.AspNetCore.Authorization;
 using Plenipo.Application.Authorization;
 using Plenipo.AspNetCore.Hosting;
 using Plenipo.AspNetCore.Identity;
@@ -25,6 +27,13 @@ builder.AddPlenipoModule<ComplianceModule>();
 // AFTER AddPlenipoPlatform() on purpose: the platform uses AddScoped, not TryAdd, so last wins.
 builder.Services.AddScoped<RequestEnricher>();
 builder.Services.AddScoped<IRequestEnricher, PersistedDisplayNameEnricher>();
+
+// TODO(plenipo#155) — drop this once the platform can gate its ADMT disclosure surface.
+// GET /api/platform/ai-decisions is mapped by the platform with a bare RequireAuthorization(), so
+// any authenticated tenant member reads it — and in THIS product those rows are compliance-register
+// content that SPEC.md §6 gates behind compliance.view. See AiDecisionDisclosureGuard for why this
+// is an additive IAuthorizationHandler rather than the "last wins" replacement used above.
+builder.Services.AddSingleton<IAuthorizationHandler, AiDecisionDisclosureGuard>();
 
 // ── Role baselines ────────────────────────────────────────────────────────────────────────────
 // These are the SHIPPED starting points; they are runtime-editable per tenant in the admin

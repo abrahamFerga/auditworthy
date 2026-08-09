@@ -30,7 +30,7 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
     /// move, because every count taken from the file moves with the file. Update it in the same
     /// commit that changes the catalog.
     /// </summary>
-    private const int KnownCatalogGets = 15;
+    private const int KnownCatalogGets = 16;
 
     [Fact]
     public async Task Every_GET_in_the_committed_catalog_resolves()
