@@ -167,9 +167,16 @@ public sealed class ControlsRegisterTests(IntegrationFixture fixture)
             // by ';', so this pairs each reference with ITS status instead of merely confirming
             // both strings appear somewhere in the reply — which every row would satisfy as long
             // as one row of each status was present.
+            //
+            // Anchored on the "<reference> —" token rather than on the bare reference, because
+            // references are prefixes of each other: a plain Contains matches "A.5.1" against
+            // A.5.15's segment. That is not hypothetical — seeding A.5.15 as Implemented and
+            // dropping A.5.1 from the tool's list makes the unanchored form PASS while the
+            // assistant never mentions A.5.1 at all. A check whose ability to fail depends on
+            // one unrelated seed value differing is not a check.
             var segment = turn.Text
                 .Split(';')
-                .FirstOrDefault(s => s.Contains(reference, StringComparison.Ordinal));
+                .FirstOrDefault(s => s.TrimStart().Contains($"{reference} —", StringComparison.Ordinal));
 
             Assert.True(segment is not null,
                 $"The reply never mentions control {reference}, which the tab renders. Reply: {turn.Text}");
