@@ -1,6 +1,8 @@
 using Auditworthy.Compliance;
+using Auditworthy.Host.Identity;
 using Plenipo.Application.Authorization;
 using Plenipo.AspNetCore.Hosting;
+using Plenipo.AspNetCore.Identity;
 using Plenipo.AspNetCore.Modules;
 
 // Auditworthy — a thin product host on the Plenipo platform. Everything that would normally be
@@ -15,6 +17,14 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddPlenipoPlatform();
 builder.AddPlenipoModule<ComplianceModule>();
+
+// TODO(plenipo#149) — drop both lines once the platform prefers the persisted user record.
+// The platform enriches the request context with the TOKEN's name claim rather than the persisted
+// User.DisplayName, which puts a constant in the audit's actor column and in the approvals queue's
+// proposer. See PersistedDisplayNameEnricher for why this product will not wait on it. Registered
+// AFTER AddPlenipoPlatform() on purpose: the platform uses AddScoped, not TryAdd, so last wins.
+builder.Services.AddScoped<RequestEnricher>();
+builder.Services.AddScoped<IRequestEnricher, PersistedDisplayNameEnricher>();
 
 // ── Role baselines ────────────────────────────────────────────────────────────────────────────
 // These are the SHIPPED starting points; they are runtime-editable per tenant in the admin
