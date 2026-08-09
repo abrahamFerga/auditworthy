@@ -149,6 +149,7 @@ public sealed class ControlsRegisterTests(IntegrationFixture fixture)
             .RootElement.EnumerateArray()
             .Select(r => (
                 Reference: r.GetProperty("reference").GetString()!,
+                Name: r.GetProperty("name").GetString()!,
                 Status: r.GetProperty("status").GetString()!))
             .ToArray();
 
@@ -161,7 +162,7 @@ public sealed class ControlsRegisterTests(IntegrationFixture fixture)
         Assert.False(turn.Failed, $"RUN_ERROR: {turn.Error}");
         Assert.Contains("list_controls", turn.ToolCalls);
 
-        foreach (var (reference, status) in rows)
+        foreach (var (reference, name, status) in rows)
         {
             // Segment-matched rather than whole-string-matched: the tool lists controls separated
             // by ';', so this pairs each reference with ITS status instead of merely confirming
@@ -181,7 +182,15 @@ public sealed class ControlsRegisterTests(IntegrationFixture fixture)
             Assert.True(segment is not null,
                 $"The reply never mentions control {reference}, which the tab renders. Reply: {turn.Text}");
 
-            Assert.True(segment!.Contains(status, StringComparison.Ordinal),
+            // Name and status both, because the acceptance criterion is "names and statuses" and
+            // they fail independently: dropping `{c.Name}` from `ListControlsAsync` leaves a
+            // status-only assertion green while chat says "A.5.1 — [Implemented]" and the tab
+            // still renders "Information security policy". That is the chat/tab drift this test
+            // exists to prevent, so pinning half of it is not pinning it.
+            Assert.True(segment!.Contains(name, StringComparison.Ordinal),
+                $"The reply reports {reference} without the name the tab shows ({name}). Segment: {segment}");
+
+            Assert.True(segment.Contains(status, StringComparison.Ordinal),
                 $"The reply reports {reference} without the status the tab shows ({status}). Segment: {segment}");
         }
     }
