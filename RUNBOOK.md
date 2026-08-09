@@ -175,8 +175,15 @@ the same PR.**
 
 ### A chat turn over AG-UI (the core feature)
 
+`$h` below is the header set for the whole of §4 and §5 — the chat turn, the approval round trip and
+the admin reads all reuse it. `X-Dev-Name` is in it because §3's rule applies here first: swap
+`X-Dev-Subject` to assert an RBAC boundary and leave the name behind, and both subjects land in the
+audit as `Dev User`, which is the defect #64 exists about.
+
 ```powershell
-$h = @{ "X-Dev-Subject"="dev-user"; "X-Dev-Tenant"="dev"; "X-Dev-Roles"="system_admin" }
+# Change X-Dev-Name whenever you change X-Dev-Subject (§3) — the audit's actor column is
+# written from it, and it is first-contact-wins, so a stale name cannot be corrected later.
+$h = @{ "X-Dev-Subject"="dev-user"; "X-Dev-Name"="Dev User"; "X-Dev-Tenant"="dev"; "X-Dev-Roles"="system_admin" }
 $body = @{ messages = @(@{ id="m1"; role="user"; content="Which controls are not yet effective?" }) } | ConvertTo-Json
 $r = Invoke-WebRequest "$base/api/agui/compliance" -Method Post -Headers $h `
        -ContentType "application/json" -Body $body -UseBasicParsing
