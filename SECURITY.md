@@ -29,6 +29,15 @@ If that exclusion is ever lost, the approval lane becomes ceremony and this prod
 *an accountable owner approves before anything is committed* — becomes false. Treat any change to it
 as a security change.
 
+The rule has a converse, and it was open until #76: **whoever approves must themselves be entitled
+to the action they are approving.** `chat.approvals.manage` alone is approval *authority*, not
+authority to perform the write. At Plenipo `0.1.0-alpha.28` the platform's `ApprovalExecutor` runs a
+parked call without re-reading the tool's own permission, so a role holding nothing but approval
+authority — or the platform's own `tenant_admin` — could commit a write RBAC-before-the-model had
+refused it seconds earlier. Until the platform closes that (`TODO(plenipo#145)`), every
+approval-gated tool in this module carries its own execution-time check via `PermissionGatedTool`,
+and both halves of the rule are asserted at runtime in `ApprovalLaneRbacTests`.
+
 ## What this product does not do
 
 - **It does not deliver certification.** ISO 27001 and NIS2 conformity are assessed by accredited
