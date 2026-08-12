@@ -1,8 +1,10 @@
 using Auditworthy.Compliance;
 using Auditworthy.Compliance.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Plenipo.Application.Authorization;
+using Plenipo.Core.Identity;
 using Plenipo.Core.Multitenancy;
 using Plenipo.Modules.Sdk;
 using Xunit;
@@ -136,10 +138,74 @@ public sealed class ManifestGuardTests
         }
     }
 
+    /// <summary>
+    /// A principal holding nothing. The guards below only read declarations, so any
+    /// <see cref="ICurrentUser"/> would do — except for
+    /// <see cref="Every_approval_gated_tool_refuses_a_caller_without_its_permission"/>, which is
+    /// about precisely this principal.
+    /// </summary>
+    private sealed class NoPermissionsCurrentUser : ICurrentUser
+    {
+        public Guid? UserId => Guid.Parse("00000000-0000-0000-0000-0000000000b1");
+        public string? Subject => "no-permissions";
+        public string? DisplayName => "No Permissions";
+        public Guid? TenantId => Guid.Parse("00000000-0000-0000-0000-0000000000a1");
+        public bool IsAuthenticated => true;
+        public IReadOnlySet<string> Permissions { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public bool HasPermission(string permission) => PermissionMatcher.IsGranted(Permissions, permission);
+    }
+
+    /// <summary>
+    /// An approval-gated tool re-checks its own permission when it runs — the cheapest rung that
+    /// catches #76.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ApprovalLaneRbacTests</c> proves the same rule through the real approve endpoint, which is
+    /// the evidence that matters; this one catches the regression a second earlier and without
+    /// Docker. It is a declaration-level guard in the same spirit as the two above: the failure it
+    /// prevents — a gated tool that executes for whoever happens to hold
+    /// <c>chat.approvals.manage</c> — is silent, and arrives with the next write tool rather than
+    /// with the mistake.
+    /// </para>
+    /// <para>
+    /// TODO(plenipo#145): when the platform's <c>ApprovalExecutor</c> checks the approver itself,
+    /// this guard and <c>PermissionGatedTool</c> both go.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Every_approval_gated_tool_refuses_a_caller_without_its_permission()
+    {
+        var gated = BuildToolSourceTools().Where(t => t.RequiresApproval).ToList();
+
+        // An empty set would make the loop below vacuously true, and "no write tool is gated" is
+        // itself the failure this module must never ship.
+        Assert.NotEmpty(gated);
+
+        // Arguments the tool would accept, deliberately: called with an empty bag the refusal is
+        // indistinguishable from argument binding failing first, and the red this test must produce
+        // is "the tool went ahead and tried to do the work", not "it could not be called at all".
+        var arguments = new AIFunctionArguments
+        {
+            ["reference"] = "A.5.1",
+            ["status"] = "Effective",
+            ["reason"] = "Module guard: a caller with no permissions must never reach the write.",
+        };
+
+        foreach (var tool in gated)
+        {
+            var denied = await Assert.ThrowsAsync<UnauthorizedAccessException>(
+                async () => await tool.Function.InvokeAsync(arguments, CancellationToken.None));
+
+            Assert.Contains(tool.Permission, denied.Message, StringComparison.Ordinal);
+        }
+    }
+
     private static IReadOnlyList<ModuleTool> BuildToolSourceTools()
     {
         var services = new ServiceCollection();
         services.AddSingleton<ITenantContext, FixedTenantContext>();
+        services.AddSingleton<ICurrentUser, NoPermissionsCurrentUser>();
         services.AddDbContext<ComplianceDbContext>(o => o.UseNpgsql("Host=localhost;Database=guard"));
         services.AddScoped<ComplianceTools>();
 

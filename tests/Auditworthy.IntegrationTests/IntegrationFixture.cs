@@ -80,8 +80,58 @@ public sealed class IntegrationFixture : IAsyncLifetime
         client.DefaultRequestHeaders.Add("X-Dev-Subject", subject);
         client.DefaultRequestHeaders.Add("X-Dev-Tenant", "dev");
         client.DefaultRequestHeaders.Add("X-Dev-Roles", roles);
+        client.DefaultRequestHeaders.Add("X-Dev-Name", DevDisplayName(subject));
+        client.DefaultRequestHeaders.Add("X-Dev-Email", DevEmail(subject));
         return client;
     }
+
+    /// <summary>
+    /// A display name for a dev subject — <c>analyst-anna</c> becomes <c>Analyst Anna</c> (#64).
+    /// <para>
+    /// Dev-auth defaults the <c>name</c> claim to the constant "Dev User" for every subject
+    /// (<c>DevAuthenticationHandler.cs:24</c>), and the platform writes the persisted
+    /// <c>User.DisplayName</c> from that claim at JIT provisioning and never again — the
+    /// returning-user branch of <c>RequestEnricher</c> touches only <c>LastSeenAt</c>. So the
+    /// constant is not a claim that #55's enricher can overrule; it becomes the record, and
+    /// preferring the record faithfully reports it. The only place to break the tie is at the
+    /// caller, before the row exists.
+    /// </para>
+    /// <para>
+    /// The platform already accepts <c>X-Dev-Name</c> — verified against
+    /// <c>Plenipo.AspNetCore/Auth/DevAuthenticationHandler.cs:24</c> at alpha.28, NOT against
+    /// documentation — so this needs no platform change and carries no shim.
+    /// </para>
+    /// <para>
+    /// Deliberately derived rather than looked up in a table: a table only names the subjects
+    /// someone remembered to add, and the subject that silently falls back to "Dev User" is exactly
+    /// the one #64 is about. Every subject gets a distinct name or the derivation is broken.
+    /// </para>
+    /// </summary>
+    public static string DevDisplayName(string subject) =>
+        string.Join(' ', subject
+            .Split(['-', '_', '.'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => char.ToUpperInvariant(part[0]) + part[1..]));
+
+    /// <summary>
+    /// An email for a dev subject — <c>analyst-anna</c> becomes
+    /// <c>analyst-anna@dev.auditworthy.local</c> (#64, second half).
+    /// <para>
+    /// The display name was only half the constant. Dev-auth also defaults the <c>email</c> claim to
+    /// <c>dev@plenipo.local</c> for EVERY subject
+    /// (<c>Plenipo.AspNetCore/Auth/DevAuthenticationHandler.cs:23</c>, alpha.28 — read from source,
+    /// not documentation), and <c>RequestEnricher</c> writes the persisted <c>User.Email</c> from
+    /// that claim on the provision path (<c>Email = email ?? subject</c>). So Admin → Users lists
+    /// every JIT-provisioned person at one address, which is the same failure as the name and is
+    /// fixed the same way: at the caller, before the row exists.
+    /// </para>
+    /// <para>
+    /// Derived rather than tabulated, for the reason given on <see cref="DevDisplayName"/>: the
+    /// subject nobody remembered to add to a table is exactly the one that falls back to the
+    /// constant. <c>.local</c> mirrors the platform's own <c>dev@plenipo.local</c> — it is reserved
+    /// for local use and cannot be mistaken for a deliverable address.
+    /// </para>
+    /// </summary>
+    public static string DevEmail(string subject) => $"{subject}@dev.auditworthy.local";
 
     /// <summary>
     /// A DI scope with tenant + user + permissions populated — how module tools run AFTER the

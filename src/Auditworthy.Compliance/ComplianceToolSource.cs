@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Plenipo.Application.Authorization;
+using Plenipo.Core.Identity;
 using Plenipo.Modules.Sdk;
 
 namespace Auditworthy.Compliance;
@@ -22,6 +23,7 @@ public sealed class ComplianceToolSource : IModuleToolSource
     public IReadOnlyList<ModuleTool> GetTools(IServiceProvider scopedServices)
     {
         var tools = scopedServices.GetRequiredService<ComplianceTools>();
+        var currentUser = scopedServices.GetRequiredService<ICurrentUser>();
 
         return
         [
@@ -44,12 +46,32 @@ public sealed class ComplianceToolSource : IModuleToolSource
                 ModuleId = ModuleId,
                 Name = "propose_control_change",
                 Permission = Permissions.ForTool(ModuleId, "propose_control_change"),
-                Function = AIFunctionFactory.Create(
-                    tools.ProposeControlChangeAsync, name: "propose_control_change"),
+                // TODO(plenipo#145): drop the wrapper once the platform's ApprovalExecutor checks
+                // the approver against tool.Permission itself. Until then the approval lane
+                // executes a parked call for anyone holding chat.approvals.manage, so an
+                // approval-gated tool MUST carry its own execution-time check — see
+                // PermissionGatedTool and auditworthy#76.
+                Function = PermissionGated(
+                    AIFunctionFactory.Create(
+                        tools.ProposeControlChangeAsync, name: "propose_control_change"),
+                    Permissions.ForTool(ModuleId, "propose_control_change"),
+                    currentUser),
                 // Kept in sync with the manifest descriptor deliberately: the runner unions both
                 // sets, so setting one and reviewing only that one hides a broken gate.
                 RequiresApproval = true,
             },
         ];
     }
+
+    /// <summary>
+    /// Re-checks <paramref name="permission"/> when the function actually runs.
+    /// </summary>
+    /// <remarks>
+    /// Every approval-gated tool goes through this, and only approval-gated tools need it: a read
+    /// tool is never parked, so it is never reachable through
+    /// <c>POST /api/chat/approvals/{id}/approve</c> — the one path that reaches a tool without
+    /// having asked whether the caller may use it.
+    /// </remarks>
+    private static AIFunction PermissionGated(AIFunction function, string permission, ICurrentUser currentUser) =>
+        new PermissionGatedTool(function, permission, currentUser);
 }
