@@ -131,6 +131,8 @@ Development with no IdP configured uses the dev-auth fallback. Send these on **e
 
 ```http
 X-Dev-Subject: dev-user
+X-Dev-Name:    Dev User
+X-Dev-Email:   dev-user@dev.auditworthy.local
 X-Dev-Tenant:  dev
 X-Dev-Roles:   system_admin
 ```
@@ -139,6 +141,45 @@ X-Dev-Roles:   system_admin
 403 — that is the point of the header being per-request. The three shipped baselines are
 `compliance-reader`, `compliance-analyst` and `compliance-owner`
 (`src/Auditworthy.Host/Program.cs`).
+
+### `X-Dev-Name` and `X-Dev-Email` are not optional here, and both are first-contact-wins (#64)
+
+Dev-auth defaults the `name` claim to the constant **`Dev User`** and the `email` claim to
+**`dev@plenipo.local`** for every subject
+(`Plenipo.AspNetCore/Auth/DevAuthenticationHandler.cs:22-23`, alpha.28 — read from source, not
+docs). The platform writes the persisted `User.DisplayName` and `User.Email` **from those claims at
+JIT provisioning and never again**: `RequestEnricher`'s returning-user branch refreshes `LastSeenAt`
+and nothing else.
+
+Both matter, and the email is not cosmetic: `GET /api/admin/users` is ordered by email and is the
+surface an auditor is shown, so leaving it constant lists every person in the tenant at one address.
+Measured at runtime before this was fixed — two fresh subjects both read `dev@plenipo.local`
+(`IdentityAttributionTests.Two_dev_subjects_are_two_different_emails_in_the_audit`, seen red).
+
+Three consequences, and the last is the one that costs an hour:
+
+1. **Omit either header and every subject is one actor.** Two different people become the same name
+   in the append-only audit and in the approvals queue's proposer, at one address in Admin → Users —
+   the product's central claim, voided by a missing header. Change `X-Dev-Name` **and**
+   `X-Dev-Email` whenever you change `X-Dev-Subject`.
+2. **`dev-user` is already burned before you send anything.** Dev-auth defaults *every* header, so
+   the first request that reaches the host at all — the `/alive` poll you boot with — authenticates
+   as `dev-user` and provisions it at `Dev User` / `dev@plenipo.local`. Measured on a live host
+   2026-08-12: its `UserProvisioned` row is stamped 17:42:43, fifteen seconds before the first
+   catalog request at 17:42:58. So the catalog's default `@subject = dev-user` reads the constants
+   on any database that has ever served a request, whatever `@name` and `@email` say. **Assert
+   attribution on a subject of your own**, the way the `it-reader` block does — that is the case
+   that matters anyway, because #64 is about telling two people apart.
+3. **You cannot rename a subject by changing the header.** The row already says `Dev User`, and
+   this product deliberately prefers the persisted record over the claim (`#55`,
+   `src/Auditworthy.Host/Identity/PersistedDisplayNameEnricher.cs`), so the stale name keeps
+   winning. Either use a subject you have never sent before, or recreate the database
+   (`docker volume rm auditworthy-pg-data` in Mode A; the Mode B container is throwaway; the
+   Testcontainers fixture is fresh every run and so is never affected).
+
+The integration fixture derives both from the subject for you — `IntegrationFixture.DevDisplayName`,
+so `analyst-anna` becomes `Analyst Anna`, and `IntegrationFixture.DevEmail`, so it becomes
+`analyst-anna@dev.auditworthy.local` — and every client it hands out carries them.
 
 ## 4. Exercise it
 
@@ -151,8 +192,16 @@ the same PR.**
 
 ### A chat turn over AG-UI (the core feature)
 
+`$h` below is the header set for the whole of §4 and §5 — the chat turn, the approval round trip and
+the admin reads all reuse it. `X-Dev-Name` and `X-Dev-Email` are in it because §3's rule applies
+here first: swap `X-Dev-Subject` to assert an RBAC boundary and leave them behind, and both subjects
+land in the audit as `Dev User` at `dev@plenipo.local`, which is the defect #64 exists about.
+
 ```powershell
-$h = @{ "X-Dev-Subject"="dev-user"; "X-Dev-Tenant"="dev"; "X-Dev-Roles"="system_admin" }
+# Change X-Dev-Name and X-Dev-Email whenever you change X-Dev-Subject (§3) — the audit's actor
+# column and Admin -> Users are written from them, and both are first-contact-wins, so a stale
+# value cannot be corrected later.
+$h = @{ "X-Dev-Subject"="dev-user"; "X-Dev-Name"="Dev User"; "X-Dev-Email"="dev-user@dev.auditworthy.local"; "X-Dev-Tenant"="dev"; "X-Dev-Roles"="system_admin" }
 $body = @{ messages = @(@{ id="m1"; role="user"; content="Which controls are not yet effective?" }) } | ConvertTo-Json
 $r = Invoke-WebRequest "$base/api/agui/compliance" -Method Post -Headers $h `
        -ContentType "application/json" -Body $body -UseBasicParsing
