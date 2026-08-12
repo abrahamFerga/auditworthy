@@ -31,7 +31,9 @@ builder.Services.AddScoped<IRequestEnricher, PersistedDisplayNameEnricher>();
 // TODO(plenipo#155) — drop this once the platform can gate its ADMT disclosure surface.
 // GET /api/platform/ai-decisions is mapped by the platform with a bare RequireAuthorization(), so
 // any authenticated tenant member reads it — and in THIS product those rows are compliance-register
-// content that SPEC.md §6 gates behind compliance.view. See AiDecisionDisclosureGuard for why this
+// content that ComplianceModule.cs:293 already gates behind compliance.view on
+// /api/compliance/controls (and :101 on the Controls tab that reads it). Source, not SPEC.md: that
+// permission string is absent from the spec. See AiDecisionDisclosureGuard for why this
 // is an additive IAuthorizationHandler rather than the "last wins" replacement used above.
 builder.Services.AddSingleton<IAuthorizationHandler, AiDecisionDisclosureGuard>();
 

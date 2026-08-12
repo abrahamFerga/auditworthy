@@ -17,8 +17,13 @@ namespace Auditworthy.Host.Authorization;
 /// <para>
 /// For Auditworthy that generic default is a disclosure hole. Every AI decision in this product IS
 /// compliance-register content — the rows carry the control reference, the proposed status, the
-/// reason text, who proposed it and who approved it — and <c>SPEC.md</c> §6 gates exactly that
-/// material behind <c>compliance.view</c>. <c>/api/compliance/controls</c> enforces it and returns
+/// reason text, who proposed it and who approved it — and this product already gates exactly that
+/// material behind <c>compliance.view</c>: <c>ComplianceModule.cs:293</c> puts
+/// <c>RequireAuthorization(PermissionRequirement.PolicyName(ViewCompliance))</c> on
+/// <c>/api/compliance/controls</c>, and <c>ComplianceModule.cs:101</c> puts the same permission on
+/// the Controls tab that reads it. (The gate is a source fact, not a spec one —
+/// <c>compliance.view</c> appears nowhere in <c>SPEC.md</c>, whose §6 names only the role baselines
+/// and <c>tools.compliance.*</c>.) That endpoint enforces it and returns
 /// 403; the disclosure route handed the same material to a caller whose <c>/api/platform/me</c>
 /// reported <c>"permissions":[]</c>. Two doors onto one body of data with one of them unlocked is
 /// the RBAC-before-the-model invariant broken, and the check belongs in front of the data rather
