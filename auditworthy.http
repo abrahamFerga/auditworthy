@@ -72,6 +72,8 @@ X-Dev-Roles: {{roles}}
 ### this returns 403; before the guard it returned 200 with rows.
 GET {{base}}/api/platform/ai-decisions
 X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
