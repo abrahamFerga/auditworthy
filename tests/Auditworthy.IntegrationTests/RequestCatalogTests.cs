@@ -102,9 +102,14 @@ public sealed class RequestCatalogTests(IntegrationFixture fixture)
             "auditworthy.http documents endpoints that do not resolve:\n  " + string.Join("\n  ", failures));
 
         // 2. The strict parser has not silently stopped matching. Two independent predicates over
-        //    the same file: they agree today at 15, and they disagree the moment a line is written
-        //    as `get `, or with a tab, or indented — all of which the loop would skip in silence
-        //    while every count derived from its own rule agreed with it.
+        //    the same file: they agree today at KnownCatalogGets, and they disagree the moment a
+        //    line is written as `get `, or with a tab, or indented — all of which the loop would
+        //    skip in silence while every count derived from its own rule agreed with it.
+        //
+        //    Named rather than restated as a literal ON PURPOSE. This comment used to read "they
+        //    agree today at 15" and was still saying 15 when the pinned count had moved to 16 — a
+        //    stale number inside the one guard whose whole job is catching stale numbers. A second
+        //    copy of a count has nothing keeping it honest, so there is now only one.
         //
         //    Checked BEFORE the pinned count below, and the order carries information: a format
         //    drift drops `declared` too, so the pinned count would also fire — but it would report
