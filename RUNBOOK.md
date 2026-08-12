@@ -156,13 +156,21 @@ surface an auditor is shown, so leaving it constant lists every person in the te
 Measured at runtime before this was fixed — two fresh subjects both read `dev@plenipo.local`
 (`IdentityAttributionTests.Two_dev_subjects_are_two_different_emails_in_the_audit`, seen red).
 
-Two consequences, and the second is the one that costs an hour:
+Three consequences, and the last is the one that costs an hour:
 
 1. **Omit either header and every subject is one actor.** Two different people become the same name
    in the append-only audit and in the approvals queue's proposer, at one address in Admin → Users —
    the product's central claim, voided by a missing header. Change `X-Dev-Name` **and**
    `X-Dev-Email` whenever you change `X-Dev-Subject`.
-2. **You cannot rename a subject by changing the header.** The row already says `Dev User`, and
+2. **`dev-user` is already burned before you send anything.** Dev-auth defaults *every* header, so
+   the first request that reaches the host at all — the `/alive` poll you boot with — authenticates
+   as `dev-user` and provisions it at `Dev User` / `dev@plenipo.local`. Measured on a live host
+   2026-08-12: its `UserProvisioned` row is stamped 17:42:43, fifteen seconds before the first
+   catalog request at 17:42:58. So the catalog's default `@subject = dev-user` reads the constants
+   on any database that has ever served a request, whatever `@name` and `@email` say. **Assert
+   attribution on a subject of your own**, the way the `it-reader` block does — that is the case
+   that matters anyway, because #64 is about telling two people apart.
+3. **You cannot rename a subject by changing the header.** The row already says `Dev User`, and
    this product deliberately prefers the persisted record over the claim (`#55`,
    `src/Auditworthy.Host/Identity/PersistedDisplayNameEnricher.cs`), so the stale name keeps
    winning. Either use a subject you have never sent before, or recreate the database
