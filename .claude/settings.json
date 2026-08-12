@@ -3,9 +3,12 @@
 
   "extraKnownMarketplaces": {
     "plenipo-agents": {
-      "source": { "source": "github", "repo": "abrahamFerga/plenipo-agents" }
+      "source": { "source": "github", "repo": "abrahamFerga/plenipo-agents" },
+      "autoUpdate": true
     }
   },
+
+  "model": "claude-sonnet-5",
 
   "enabledPlugins": {
     "plenipo@plenipo-agents": true,
