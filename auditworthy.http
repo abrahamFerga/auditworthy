@@ -16,18 +16,24 @@
 # Swap the role to assert a boundary: compliance-reader (reads only), compliance-analyst (may
 # propose, may NOT approve), compliance-owner (may approve), system_admin (holds `*`).
 #
-# The @name variable below — send it, and CHANGE IT WHENEVER YOU CHANGE @subject (#64). (Spelled
-# out because a line opening with `@name` is REST Client's request-naming directive, which this is
-# not.) Dev-auth defaults the name
-# claim to the constant "Dev User" for EVERY subject, and the platform writes the persisted
-# User.DisplayName from that claim the first time a subject is seen and never again. Drop the
-# header and two different people become one indistinguishable actor in the append-only audit and
-# in the approvals queue — which is the one thing this product exists to make impossible.
+# The @name and @email variables below — send them, and CHANGE THEM BOTH WHENEVER YOU CHANGE
+# @subject (#64). (Spelled out because a line opening with `@name` is REST Client's request-naming
+# directive, which this is not.) Dev-auth defaults the name claim to the constant "Dev User" and
+# the email claim to "dev@plenipo.local" for EVERY subject, and the platform writes the persisted
+# User.DisplayName and User.Email from those claims the first time a subject is seen and never
+# again. Drop either header and two different people become one indistinguishable actor in the
+# append-only audit and in the approvals queue — which is the one thing this product exists to make
+# impossible. `.local` is reserved for local use, so these addresses can never be delivered to.
 #
 # It is first-contact-wins: once a subject has been provisioned as "Dev User", changing @name will
 # NOT rename it (see RUNBOOK.md §3). Recreate the database, or use a subject you have not used yet.
+#
+# The three are checked as a set by DevAuthHeaderConventionTests: @name and @email must be
+# what IntegrationFixture.DevDisplayName and DevEmail derive from the committed @subject, so a
+# swapped @subject that leaves either behind fails the build instead of quietly re-creating #64.
 @subject = dev-user
 @name    = Dev User
+@email   = dev-user@dev.auditworthy.local
 @tenant  = dev
 @roles   = system_admin
 
@@ -46,6 +52,7 @@ GET {{base}}/health
 GET {{base}}/api/platform/modules
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -53,6 +60,7 @@ X-Dev-Roles: {{roles}}
 GET {{base}}/api/platform/me
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -63,6 +71,7 @@ X-Dev-Roles: {{roles}}
 GET {{base}}/api/compliance/controls
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -74,6 +83,7 @@ POST {{base}}/api/agui/{{module}}
 Content-Type: application/json
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -88,6 +98,7 @@ POST {{base}}/api/agui/{{module}}
 Content-Type: application/json
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -104,6 +115,7 @@ POST {{base}}/api/agui/{{module}}
 Content-Type: application/json
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -119,6 +131,7 @@ POST {{base}}/api/agui/{{module}}
 Content-Type: application/json
 X-Dev-Subject: it-reader
 X-Dev-Name: It Reader
+X-Dev-Email: it-reader@dev.auditworthy.local
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: compliance-reader
 
@@ -135,6 +148,7 @@ X-Dev-Roles: compliance-reader
 GET {{base}}/api/chat/approvals
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -148,6 +162,7 @@ X-Dev-Roles: {{roles}}
 POST {{base}}/api/chat/approvals/{{approvalId}}/approve
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -155,6 +170,7 @@ X-Dev-Roles: {{roles}}
 POST {{base}}/api/chat/approvals/{{approvalId}}/reject
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -163,6 +179,7 @@ X-Dev-Roles: {{roles}}
 GET {{base}}/api/chat/conversations
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -175,6 +192,7 @@ X-Dev-Roles: {{roles}}
 GET {{base}}/api/admin/security/catalog
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -190,6 +208,7 @@ X-Dev-Roles: {{roles}}
 GET {{base}}/api/admin/roles
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -197,6 +216,7 @@ X-Dev-Roles: {{roles}}
 GET {{base}}/api/admin/users
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -204,6 +224,7 @@ X-Dev-Roles: {{roles}}
 GET {{base}}/api/admin/audit/tool-calls
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -211,6 +232,7 @@ X-Dev-Roles: {{roles}}
 GET {{base}}/api/admin/audit/auth-events
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -218,6 +240,7 @@ X-Dev-Roles: {{roles}}
 GET {{base}}/api/admin/usage?days=30
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -226,6 +249,7 @@ X-Dev-Roles: {{roles}}
 GET {{base}}/api/admin/ai-settings
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
@@ -235,5 +259,6 @@ X-Dev-Roles: {{roles}}
 GET {{base}}/api/jobs/mine
 X-Dev-Subject: {{subject}}
 X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
 X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}

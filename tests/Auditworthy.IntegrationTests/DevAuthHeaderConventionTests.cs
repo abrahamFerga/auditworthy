@@ -4,8 +4,8 @@ using Xunit;
 namespace Auditworthy.IntegrationTests;
 
 /// <summary>
-/// Every committed dev-auth caller that sends <c>X-Dev-Subject</c> must send <c>X-Dev-Name</c>
-/// beside it.
+/// Every committed dev-auth caller that sends <c>X-Dev-Subject</c> must send <c>X-Dev-Name</c> and
+/// <c>X-Dev-Email</c> beside it.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -41,13 +41,14 @@ public sealed class DevAuthHeaderConventionTests
     private const int KnownDevAuthCallSites = 23;
 
     /// <summary>
-    /// How far from an <c>X-Dev-Subject</c> its <c>X-Dev-Name</c> may sit. A dev-auth caller is a
-    /// contiguous block of headers in every form this repo uses — an <c>.http</c> request, a
-    /// PowerShell hashtable, four <c>DefaultRequestHeaders.Add</c> lines — and the widest real gap
-    /// today is three lines (<c>IntegrationFixture.cs:80</c> to <c>:83</c>). Four leaves room for
-    /// one more header without licensing a match from an unrelated block.
+    /// How far from an <c>X-Dev-Subject</c> its <c>X-Dev-Name</c> and <c>X-Dev-Email</c> may sit. A
+    /// dev-auth caller is a contiguous block of headers in every form this repo uses — an
+    /// <c>.http</c> request, a PowerShell hashtable, five <c>DefaultRequestHeaders.Add</c> lines —
+    /// and the widest real gap today is four lines (<c>IntegrationFixture.cs:80</c> to <c>:84</c>,
+    /// where the email is the last of the five). Five leaves room for one more header without
+    /// licensing a match from an unrelated block.
     /// </summary>
-    private const int PairingWindow = 4;
+    private const int PairingWindow = 5;
 
     /// <summary>
     /// A line that <em>sends</em> the header, as opposed to one that merely names it in prose.
@@ -61,6 +62,7 @@ public sealed class DevAuthHeaderConventionTests
 
     private static readonly Regex SendsSubject = Sends("X-Dev-Subject");
     private static readonly Regex SendsName = Sends("X-Dev-Name");
+    private static readonly Regex SendsEmail = Sends("X-Dev-Email");
 
     /// <summary>Build output, vendored packages, and the throwaway agent worktrees — which are
     /// whole second copies of this repo and would otherwise double every count here.</summary>
@@ -71,7 +73,7 @@ public sealed class DevAuthHeaderConventionTests
         [".http", ".md", ".cs", ".ps1", ".sh", ".py", ".ts", ".tsx", ".js", ".json", ".yml", ".yaml"];
 
     [Fact]
-    public void Every_dev_auth_caller_sends_a_display_name()
+    public void Every_dev_auth_caller_sends_a_display_name_and_an_email()
     {
         var root = FindRepoRoot();
         var files = TextFilesUnder(root).ToList();
@@ -86,6 +88,7 @@ public sealed class DevAuthHeaderConventionTests
 
             var subjects = LinesMatching(lines, SendsSubject);
             var names = LinesMatching(lines, SendsName);
+            var emails = LinesMatching(lines, SendsEmail);
 
             if (subjects.Count == 0)
             {
@@ -97,26 +100,39 @@ public sealed class DevAuthHeaderConventionTests
 
             foreach (var subjectLine in subjects)
             {
-                if (names.Any(n => Math.Abs(n - subjectLine) <= PairingWindow))
+                var missing = new List<string>();
+
+                if (!names.Any(n => Math.Abs(n - subjectLine) <= PairingWindow))
+                {
+                    missing.Add("X-Dev-Name");
+                }
+
+                if (!emails.Any(e => Math.Abs(e - subjectLine) <= PairingWindow))
+                {
+                    missing.Add("X-Dev-Email");
+                }
+
+                if (missing.Count == 0)
                 {
                     continue;
                 }
 
                 failures.Add(
                     $"{Path.GetRelativePath(root, file).Replace('\\', '/')}:{subjectLine + 1}: "
-                    + $"{lines[subjectLine].Trim()}");
+                    + $"missing {string.Join(" and ", missing)} — {lines[subjectLine].Trim()}");
             }
         }
 
         // 1. The claim this guard exists to make. Reported first: it is the specific defect, and the
         //    coverage assertions below can fire for unrelated, routine reasons.
         Assert.True(failures.Count == 0,
-            "These committed callers send X-Dev-Subject without an X-Dev-Name beside it, so every "
-            + "subject they reach the API as is the constant \"Dev User\" — two different people, "
-            + "one indistinguishable actor in the append-only audit and in the approvals queue's "
-            + "proposer (#64):\n  "
+            "These committed callers send X-Dev-Subject without an X-Dev-Name and/or an "
+            + "X-Dev-Email beside it, so every subject they reach the API as is the constant "
+            + "\"Dev User\" at the constant \"dev@plenipo.local\" — two different people, one "
+            + "indistinguishable actor in the append-only audit, in the approvals queue's proposer "
+            + "and in Admin → Users (#64):\n  "
             + string.Join("\n  ", failures)
-            + "\nSend X-Dev-Name with a name derived from the subject. See RUNBOOK.md §3.");
+            + "\nSend both, derived from the subject. See RUNBOOK.md §3.");
 
         // 2. The walk actually reached the repository, rather than finding an empty tree and
         //    concluding that a rule nothing violates is a rule everything obeys. Named files, not a

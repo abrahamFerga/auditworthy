@@ -127,10 +127,60 @@ public sealed class IdentityAttributionTests(IntegrationFixture fixture)
         }
     }
 
+    /// <summary>
+    /// The second half of #64, found by the sweep of 2026-08-09T02:47Z after the name fix was
+    /// already written: dev-auth defaults the <c>email</c> claim to the constant
+    /// <c>dev@plenipo.local</c> for every subject
+    /// (<c>Plenipo.AspNetCore/Auth/DevAuthenticationHandler.cs:23</c>), and JIT provisioning writes
+    /// the record from it (<c>RequestEnricher</c> — <c>Email = email ?? subject</c>). So the name
+    /// fix alone leaves the provisioned record with no distinguishing field but the opaque id and
+    /// the display name, and `GET /api/admin/users` — the surface an auditor is shown — still lists
+    /// four different people at one address.
+    /// <para>
+    /// Asserted against the derivation rather than merely "these two differ": distinctness alone
+    /// would also pass if the platform fell back to <c>Email = subject</c>, which is a different
+    /// mechanism that this product must not silently start depending on. Equality proves the header
+    /// reached the persisted row.
+    /// </para>
+    /// <para>
+    /// Before the fix this fails on the first assertion: both subjects read
+    /// <c>dev@plenipo.local</c>.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Two_dev_subjects_are_two_different_emails_in_the_audit()
+    {
+        // Subjects used by no other test: provisioning is first-contact-wins on a shared fixture, so
+        // a subject someone else already created would be asserting about their headers, not these.
+        using var aisha = fixture.AdminClient(subject: "auditor-aisha");
+        using var raj = fixture.AdminClient(subject: "reviewer-raj");
+
+        (await aisha.GetAsync("/api/platform/me")).EnsureSuccessStatusCode();
+        (await raj.GetAsync("/api/platform/me")).EnsureSuccessStatusCode();
+
+        var users = JsonDocument.Parse(await aisha.GetStringAsync("/api/admin/users")).RootElement;
+        var aishaEmail = PersistedEmailOf(users, "auditor-aisha");
+        var rajEmail = PersistedEmailOf(users, "reviewer-raj");
+
+        Assert.False(
+            aishaEmail == rajEmail,
+            $"Two subjects share one email ({aishaEmail}), so Admin → Users lists two people at one "
+            + "address and the only field telling them apart is a GUID — the residue of #64 the "
+            + "display-name fix does not reach.");
+
+        Assert.Equal(IntegrationFixture.DevEmail("auditor-aisha"), aishaEmail);
+        Assert.Equal(IntegrationFixture.DevEmail("reviewer-raj"), rajEmail);
+    }
+
     private static string? PersistedNameOf(JsonElement users, string subject) =>
         users.EnumerateArray()
             .Single(u => u.GetProperty("subject").GetString() == subject)
             .GetProperty("displayName").GetString();
+
+    private static string? PersistedEmailOf(JsonElement users, string subject) =>
+        users.EnumerateArray()
+            .Single(u => u.GetProperty("subject").GetString() == subject)
+            .GetProperty("email").GetString();
 
     /// <summary>Idempotent: the fixture is shared, so a second run must not 409 the whole class.</summary>
     private async Task ProvisionAcmeAsync()
@@ -163,6 +213,14 @@ public sealed class IdentityAttributionTests(IntegrationFixture fixture)
     /// </summary>
     private const string ClaimNameThatMustLose = "Token Claim That Must Lose";
 
+    /// <summary>
+    /// The same reasoning as <see cref="ClaimNameThatMustLose"/>, for the email claim: the record
+    /// for <c>acme-admin</c> is written by the provisioning call above with
+    /// <c>admin@acme.example</c>, so a claim email derived from the subject could coincide with it
+    /// and hide a regression. This one cannot be mistaken for the record.
+    /// </summary>
+    private const string ClaimEmailThatMustLose = "token-claim-that-must-lose@dev.auditworthy.local";
+
     private HttpClient Client(string tenant, string subject)
     {
         var client = fixture.Factory.CreateClient();
@@ -170,6 +228,7 @@ public sealed class IdentityAttributionTests(IntegrationFixture fixture)
         client.DefaultRequestHeaders.Add("X-Dev-Tenant", tenant);
         client.DefaultRequestHeaders.Add("X-Dev-Roles", "system_admin");
         client.DefaultRequestHeaders.Add("X-Dev-Name", ClaimNameThatMustLose);
+        client.DefaultRequestHeaders.Add("X-Dev-Email", ClaimEmailThatMustLose);
         return client;
     }
 }
