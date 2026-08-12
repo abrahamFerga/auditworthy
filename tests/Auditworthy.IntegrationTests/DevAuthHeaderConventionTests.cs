@@ -154,6 +154,65 @@ public sealed class DevAuthHeaderConventionTests
             + "have drifted, and it is now guarding less than it claims.");
     }
 
+    /// <summary>
+    /// The catalog's <c>@name</c> and <c>@email</c> must be what the subject derives, so swapping
+    /// <c>@subject</c> and leaving either behind fails the build.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Raised by the #68 review as the gap the pairing guard above cannot see: it checks that a
+    /// header is <em>sent</em>, not that it <em>agrees</em> with the subject beside it.
+    /// <c>auditworthy.http</c> defines the three as independent variables, and the file's own
+    /// instruction is to swap <c>@subject</c> to assert an RBAC boundary — so a reader who does
+    /// that and forgets the other two reproduces #64 across all 19 requests with the pairing guard
+    /// still green.
+    /// </para>
+    /// <para>
+    /// This closes the committed half of that. It cannot close the other half: an edit made in the
+    /// working copy and never committed is invisible to a test that reads files, and no test can
+    /// reach it. That residue is real and is called out in <c>auditworthy.http</c>'s own preamble
+    /// rather than left for the next reviewer to rediscover.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_catalog_preamble_derives_its_name_and_email_from_its_subject()
+    {
+        var catalog = Path.Combine(FindRepoRoot(), "auditworthy.http");
+        var lines = File.ReadAllLines(catalog);
+
+        var subject = PreambleVariable(lines, "subject");
+        var name = PreambleVariable(lines, "name");
+        var email = PreambleVariable(lines, "email");
+
+        Assert.Equal(IntegrationFixture.DevDisplayName(subject), name);
+        Assert.Equal(IntegrationFixture.DevEmail(subject), email);
+    }
+
+    /// <summary>
+    /// Reads a <c>@key = value</c> from the catalog preamble. Fails loudly rather than returning a
+    /// default: a variable that has been renamed away must break this test, not silently satisfy it
+    /// by comparing two empty strings.
+    /// </summary>
+    private static string PreambleVariable(string[] lines, string key)
+    {
+        var pattern = new Regex("^@" + Regex.Escape(key) + @"\s*=\s*(?<value>.+?)\s*$");
+
+        foreach (var line in lines)
+        {
+            var match = pattern.Match(line);
+
+            if (match.Success)
+            {
+                return match.Groups["value"].Value;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"auditworthy.http no longer defines @{key}. The dev-auth preamble is @subject, @name "
+            + "and @email as a set — if one was renamed or removed, this guard is checking nothing "
+            + "and the catalog can drift back into #64 unobserved.");
+    }
+
     private static List<int> LinesMatching(string[] lines, Regex pattern)
     {
         var hits = new List<int>();
