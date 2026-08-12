@@ -38,7 +38,7 @@ public sealed class DevAuthHeaderConventionTests
     /// parser has stopped matching or that callers were deleted. Update it in the same commit that
     /// adds or removes one.
     /// </summary>
-    private const int KnownDevAuthCallSites = 23;
+    private const int KnownDevAuthCallSites = 24;
 
     /// <summary>
     /// How far from an <c>X-Dev-Subject</c> its <c>X-Dev-Name</c> and <c>X-Dev-Email</c> may sit. A
