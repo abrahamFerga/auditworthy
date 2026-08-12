@@ -127,5 +127,8 @@ End work in exactly one named state: `Success`, `No-op`, `Blocked`, `Stalled`, `
 `Approval-required`. Three failures for three different reasons means you are `Stalled` — the
 diagnosis is wrong, not the fix.
 
-**Never merge your own pull request.** The maker is not the approver. The autonomy level in
-`workflow.json` is **0** — read it, never infer it.
+**Never merge your own pull request.** The maker is not the approver. Read the autonomy level out of
+`workflow.json` — never infer it, and never quote it from here. This file claimed **0** long after a
+human had raised it to **3**, which is the more dangerous direction for a stale fact to be wrong in:
+an agent trusting the number in this sentence would have believed nothing could merge unattended
+while, in fact, everything could.
