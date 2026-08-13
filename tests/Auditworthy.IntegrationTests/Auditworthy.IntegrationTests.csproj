@@ -16,6 +16,15 @@
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.2" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.6.0" />
+    <!-- Transitive-only, and pinned deliberately: Testcontainers pulls SSH.NET for an SSH transport
+         this project never uses, and every shipping Testcontainers version resolves it inside
+         GHSA-q939-rpr3-3284's affected range (<= 2025.1.0; first patched 2026.0.0) — 4.9.0 still
+         lands on 2025.1.0. Under this project's TreatWarningsAsErrors that advisory is NU1903 at
+         *restore*, which takes rung 3 of the test ladder offline entirely. A direct reference
+         raises the resolved version past the advisory and keeps the audit gate armed; suppressing
+         NU1903 or dropping TreatWarningsAsErrors would trade the signal for the rung and lose both.
+         Remove this line once Testcontainers ships a release that resolves SSH.NET >= 2026.0.0. -->
+    <PackageReference Include="SSH.NET" Version="2026.0.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.0" />
   </ItemGroup>
