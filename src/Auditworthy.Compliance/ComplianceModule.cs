@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Plenipo.Application.Authorization;
-using Plenipo.Core.Multitenancy;
 using Plenipo.Modules.Sdk;
 
 namespace Auditworthy.Compliance;
@@ -162,16 +161,21 @@ public sealed class ComplianceModule : IModule
     /// <b>The absence of a tenant is the production safety gate, and it is the platform's, not
     /// ours.</b> <c>SeedPlenipoModulesAsync</c> calls this method unconditionally, but it first
     /// calls <c>EstablishDevTenantContextAsync</c> on this very scope — and *that* is
-    /// <c>IsDevelopment</c>-gated. So outside Development no tenant is ever established and this
-    /// method returns having done nothing.
+    /// <c>IsDevelopment</c>-gated. So outside Development no tenant is ever established and
+    /// <see cref="StarterRegister.SeedAsync"/> returns having done nothing.
     /// </para>
     /// <para>
     /// Do not "improve" this by opening a new scope and looking the dev tenant up by slug. That
     /// discards the context the platform just prepared, re-implements a seam that has already run,
     /// and — because nothing reserves the slug <c>dev</c> — would write fabricated controls into any
-    /// production tenant an operator happened to name that way. A client organisation's register is
-    /// an assertion an auditor later relies on; a real tenant starts empty, which is the correct
-    /// empty state.
+    /// production tenant an operator happened to name that way. The tenant to seed is the tenant the
+    /// caller established, never one this method goes looking for.
+    /// </para>
+    /// <para>
+    /// This is startup's call site, and it is no longer the only one: a tenant created afterwards
+    /// through the admin API is seeded by the host's tenant seam, which establishes THAT tenant on
+    /// its own scope and calls the same method (#78). Whoever calls it, the register is identical
+    /// and the write is confined to the established tenant.
     /// </para>
     /// <para>
     /// Idempotent across sequential boots: it does nothing once the tenant has any control. It is
@@ -179,95 +183,8 @@ public sealed class ComplianceModule : IModule
     /// (TenantId, Reference) is what makes that race fail loudly instead of duplicating the register.
     /// </para>
     /// </remarks>
-    public async Task SeedAsync(IServiceProvider services, CancellationToken cancellationToken)
-    {
-        // The platform's scope, used as handed over. No tenant means production — nothing to seed,
-        // and that is success, not an error.
-        var tenant = services.GetRequiredService<ITenantContext>();
-
-        if (!tenant.HasTenant)
-        {
-            return;
-        }
-
-        var db = services.GetRequiredService<ComplianceDbContext>();
-
-        // No IgnoreQueryFilters: the tenant is established, so the query filter scopes this count to
-        // exactly the tenant being seeded — which is the check we want.
-        if (await db.Controls.AnyAsync(cancellationToken))
-        {
-            return;
-        }
-
-        db.Controls.AddRange(StarterRegister(tenant.RequireTenantId()));
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// A small ISO 27001 Annex A register with mixed statuses.
-    /// </summary>
-    /// <remarks>
-    /// The references are clause identifiers; the wording is ours, not the standard's text. Statuses
-    /// vary on purpose so the manifest's own suggested prompts — "Which controls are not yet
-    /// effective?" and "Show me control A.5.1" — both return a real answer on a fresh clone.
-    /// </remarks>
-    private static IEnumerable<Control> StarterRegister(Guid tenantId) =>
-    [
-        new()
-        {
-            TenantId = tenantId,
-            Reference = "A.5.1",
-            Name = "Information security policy",
-            Description = "A management-approved security policy exists, is published, and is reviewed at planned intervals.",
-            Status = ControlStatus.Implemented,
-            Owner = "Head of Security",
-        },
-        new()
-        {
-            TenantId = tenantId,
-            Reference = "A.5.15",
-            Name = "Access control",
-            Description = "Access to information and other associated assets is granted on a business need, and reviewed.",
-            Status = ControlStatus.Effective,
-            Owner = "IT Manager",
-        },
-        new()
-        {
-            TenantId = tenantId,
-            Reference = "A.5.23",
-            Name = "Information security for cloud services",
-            Description = "Acquisition, use and exit of cloud services follow the organisation's security requirements.",
-            Status = ControlStatus.InProgress,
-            Owner = "Head of Platform",
-        },
-        new()
-        {
-            TenantId = tenantId,
-            Reference = "A.6.3",
-            Name = "Security awareness and training",
-            Description = "Staff receive security awareness training relevant to their role, on joining and periodically.",
-            Status = ControlStatus.Implemented,
-            Owner = "People Operations",
-        },
-        new()
-        {
-            TenantId = tenantId,
-            Reference = "A.8.7",
-            Name = "Protection against malware",
-            Description = "Malware protection is implemented and supported by appropriate user awareness.",
-            Status = ControlStatus.Effective,
-            Owner = "IT Manager",
-        },
-        new()
-        {
-            TenantId = tenantId,
-            Reference = "A.8.16",
-            Name = "Monitoring activities",
-            Description = "Networks, systems and applications are monitored for anomalous behaviour and acted upon.",
-            Status = ControlStatus.NotImplemented,
-            Owner = "Head of Platform",
-        },
-    ];
+    public Task SeedAsync(IServiceProvider services, CancellationToken cancellationToken) =>
+        StarterRegister.SeedAsync(services, cancellationToken);
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints)
     {
