@@ -31,6 +31,31 @@ namespace Auditworthy.IntegrationTests;
 /// container. It cannot prove the block boots — only the runtime run in #71's PR can do that. What
 /// it can do is stop the two waits being deleted again by someone tidying the block.
 /// </para>
+/// <para>
+/// <b>Needle collision is this guard's characteristic failure mode.</b> Every lookup here is
+/// "first line containing a substring", and the block is full of prose — comments explaining the
+/// code, and <c>throw</c> messages quoting the very tokens being searched for — that contains the
+/// same substrings as the code. A needle that matches prose first stops guarding the code: the
+/// assertion is satisfied by a sentence *about* the behaviour while the behaviour itself is gone.
+/// Four of the seven lookups shipped that way and were caught by mutation testing (PR #91 review;
+/// the <c>.ExitCode</c> one was the finding that sent the PR back):
+/// <list type="bullet">
+/// <item><c>docker run</c> also matched the comment that explains what <c>docker run -d</c>
+/// returns, so deleting the command left the not-vacuous check green.</item>
+/// <item><c>pg_isready</c> would match a comment naming it, so replacing the poll with
+/// "# the pg_isready poll used to live here" left both readiness assertions green.</item>
+/// <item><c>/alive</c> matched the <c>throw</c> message "before /alive answered" two lines
+/// earlier than the actual request, so deleting the poll left the check green.</item>
+/// <item><c>.ExitCode</c> matched the comment "without it $api.ExitCode is EMPTY" seven lines
+/// before the throw that reports it, so stripping the exit code — deleting exactly what #71
+/// asked for — left the check green.</item>
+/// </list>
+/// The fix is to make each needle match only real code: anchor on the command at the start of a
+/// line, on the interpolated <c>$($api.ExitCode)</c> form that only a throw uses, or on a request
+/// verb preceding the URL. <b>Every assertion below has been mutation-tested: delete the behaviour
+/// it names and it goes red.</b> If you add one, prove it red the same way — a guard never seen
+/// red may be asserting nothing.
+/// </para>
 /// </remarks>
 public sealed class ModeBReadinessConventionTests
 {
@@ -38,26 +63,40 @@ public sealed class ModeBReadinessConventionTests
     /// fail this guard loudly rather than let it quietly find nothing to check.</summary>
     private const string ModeBHeading = "### Mode B — headless";
 
+    /// <summary>The container-start command itself, at the start of a line — not the comment above
+    /// it that explains what <c>docker run -d</c> returns.</summary>
+    private static readonly Regex DockerRunCommand = new(@"^\s*docker\s+run\b", RegexOptions.IgnoreCase);
+
+    /// <summary>A <c>pg_isready</c> that is executed, not one named in a comment.</summary>
+    private static readonly Regex PgIsReadyCall = new(@"^\s*[^#]*pg_isready", RegexOptions.IgnoreCase);
+
+    /// <summary>An actual request to <c>/alive</c>. The bare path also appears in two <c>throw</c>
+    /// messages, one of them *before* the real poll, so the request verb is what makes this
+    /// assertion able to fail when the poll is deleted.</summary>
+    private static readonly Regex AliveRequest =
+        new(@"(iwr|curl|Invoke-WebRequest|Invoke-RestMethod)\b[^\n]*/alive", RegexOptions.IgnoreCase);
+
     [Fact]
     public void Mode_b_waits_for_postgres_and_notices_a_dead_api()
     {
         var runbook = Path.Combine(FindRepoRoot(), "RUNBOOK.md");
         var block = ModeBScriptBlock(File.ReadAllLines(runbook));
 
-        // 0. The walk found a block that really is Mode B, so nothing below passes vacuously.
-        Assert.True(
-            block.Contains("docker run", StringComparison.OrdinalIgnoreCase)
-            && block.Contains("Start-Process", StringComparison.OrdinalIgnoreCase),
-            "The block under \"" + ModeBHeading + "\" no longer contains both `docker run` and "
-            + "`Start-Process`, so this guard is not looking at Mode B and is asserting nothing "
-            + $"about it. Block read:\n{block}");
-
-        var dockerRun = IndexOf(block, "docker run");
+        var dockerRun = IndexOfMatch(block, DockerRunCommand);
         var startProcess = IndexOf(block, "Start-Process");
+
+        // 0. The walk found a block that really is Mode B, so nothing below passes vacuously.
+        //    Anchored on the `docker run` *command*: the comment four lines below it also contains
+        //    the words "docker run", and matching that let the command be deleted with this green.
+        Assert.True(dockerRun >= 0 && startProcess >= 0,
+            "The block under \"" + ModeBHeading + "\" no longer contains both a `docker run` "
+            + "command and `Start-Process`, so this guard is not looking at Mode B and is "
+            + $"asserting nothing about it. docker run at line {dockerRun}, Start-Process at line "
+            + $"{startProcess} (-1 = absent).\nBlock read:\n{block}");
 
         // 1. The defect itself: Postgres readiness is waited for, between creating the container and
         //    starting the API. Position matters — a pg_isready after Start-Process is decoration.
-        var pgIsReady = IndexOf(block, "pg_isready");
+        var pgIsReady = IndexOfMatch(block, PgIsReadyCall);
 
         Assert.True(pgIsReady > dockerRun && pgIsReady < startProcess,
             "Mode B starts the API without waiting for Postgres to accept connections (#71). "
@@ -73,7 +112,7 @@ public sealed class ModeBReadinessConventionTests
         var pgWaitLine = LineAt(block, pgIsReady);
 
         Assert.True(
-            Regex.IsMatch(block, @"pg_isready", RegexOptions.IgnoreCase)
+            pgIsReady >= 0
             && LinesAround(block, pgIsReady, 4).Any(l => Regex.IsMatch(l, @"1\.\.\d+|while|until|for\s*\(")),
             "The `pg_isready` in Mode B is a single call, not a retry loop, so a cold container "
             + "that is not ready on the first ask still crashes the API (#71). Poll it until it "
@@ -82,11 +121,16 @@ public sealed class ModeBReadinessConventionTests
         // 3. The verification-integrity half: the /alive poll must inspect the process it started.
         //    `catch {}` around an HTTP call cannot distinguish "connection refused because the host
         //    is still booting" from "connection refused because the host is a corpse".
-        var alivePoll = IndexOf(block, "/alive");
+        //    Matched on the request verb, not on the bare path: `/alive` also appears inside the
+        //    "API exited … before /alive answered" throw two lines *earlier* than the real poll, so
+        //    the bare needle stayed green with the request deleted.
+        var alivePoll = IndexOfMatch(block, AliveRequest);
 
         Assert.True(alivePoll > startProcess,
-            "Mode B no longer polls `/alive` after `Start-Process`, so it has no readiness signal "
-            + $"at all. /alive at line {alivePoll}, Start-Process at line {startProcess}.");
+            "Mode B no longer issues a request to `/alive` after `Start-Process`, so it has no "
+            + $"readiness signal at all. /alive request at line {alivePoll}, Start-Process at line "
+            + $"{startProcess} (-1 = absent). A `/alive` mentioned only in a throw message is not a "
+            + "poll.");
 
         var hasExited = IndexOf(block, "HasExited");
 
@@ -98,15 +142,21 @@ public sealed class ModeBReadinessConventionTests
             + "stop with the exit code. Mode B is the scripted-verification path — a loop that "
             + "reports a crash as a timeout makes every proof run through it untrustworthy.");
 
-        // `.ExitCode`, not `ExitCode`: the readiness wait above reads `$LASTEXITCODE`, which
-        // contains the shorter needle and made this assertion pass on the wrong line.
-        var exitCode = IndexOf(block, ".ExitCode");
+        // The interpolated `$($api.ExitCode)`, which only a message that reports the code can
+        // contain. Two shorter needles were tried and both matched prose: `ExitCode` matches the
+        // readiness wait's `$LASTEXITCODE`, and `.ExitCode` matches the comment on the
+        // `$null = $api.Handle` line — which is *before* the loop, so stripping the code from the
+        // throw left this green. Bounded on `hasExited` for the same reason: the report belongs
+        // inside the loop that detects the death, and the bound is only meaningful once the needle
+        // can no longer match a comment that precedes it.
+        var exitCode = IndexOf(block, "$($api.ExitCode)");
 
-        Assert.True(exitCode > startProcess,
+        Assert.True(exitCode > hasExited,
             "Mode B notices that the API exited but does not report `$api.ExitCode`, which is the "
-            + "one value that names the failure (#71 was -532462766). Surface it — an agent reading "
-            + $"this output is the whole audience for Mode B. Found .ExitCode at line {exitCode}, "
-            + $"Start-Process at line {startProcess} (-1 = absent).");
+            + "one value that names the failure (#71 was -532462766). Surface it inside the "
+            + "readiness loop, interpolated — an agent reading this output is the whole audience "
+            + $"for Mode B. Found $($api.ExitCode) at line {exitCode}, HasExited at line "
+            + $"{hasExited} (-1 = absent).");
 
         // `$api.ExitCode` is an empty string unless the handle was cached while the process was
         // still alive, so a block that reports the code without this reports nothing (#71).
@@ -166,6 +216,24 @@ public sealed class ModeBReadinessConventionTests
         for (var i = 0; i < lines.Length; i++)
         {
             if (lines[i].Contains(needle, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>Zero-based line index of the first line matching <paramref name="pattern"/>, or -1.
+    /// The regex counterpart of <see cref="IndexOf"/>, used wherever a plain substring would also
+    /// match a comment or a throw message rather than the code being guarded.</summary>
+    private static int IndexOfMatch(string block, Regex pattern)
+    {
+        var lines = block.Split('\n');
+
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (pattern.IsMatch(lines[i]))
             {
                 return i;
             }
