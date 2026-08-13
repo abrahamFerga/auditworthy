@@ -92,16 +92,37 @@ dotnet build Auditworthy.slnx
 docker rm -f auditworthy-pg-test 2>$null
 docker run -d --name auditworthy-pg-test -e POSTGRES_PASSWORD=postgres -p 5433:5432 pgvector/pgvector:pg17
 
+# `docker run -d` returns when the container is CREATED, not when Postgres is serving. Start the
+# API into that window and it dies mid-TLS; see the two notes below (#71). Wait for the server.
+$pgDeadline = (Get-Date).AddSeconds(60)
+do {
+  docker exec auditworthy-pg-test pg_isready -U postgres 2>&1 | Out-Null
+  $pgReady = $LASTEXITCODE -eq 0
+  if (-not $pgReady) { Start-Sleep 1 }
+} until ($pgReady -or (Get-Date) -gt $pgDeadline)
+if (-not $pgReady) { throw "Postgres never accepted connections: docker logs auditworthy-pg-test" }
+
 $bin = "src/Auditworthy.Host/bin/Debug/net10.0"
 $pg  = "Host=127.0.0.1;Port=5433;Database={0};Username=postgres;Password=postgres"
 $env:ASPNETCORE_ENVIRONMENT = "Development"
-$api = Start-Process dotnet -WorkingDirectory $bin -PassThru -ArgumentList @(
+$api = Start-Process dotnet -WorkingDirectory $bin -PassThru `
+  -RedirectStandardError "$env:TEMP\auditworthy-api-err.txt" -ArgumentList @(
   "$PWD/$bin/Auditworthy.Host.dll",
   "--ConnectionStrings:plenipo-platform=$($pg -f 'auditworthy_platform')",
   "--ConnectionStrings:plenipo-audit=$($pg -f 'auditworthy_audit')",
   "--urls=http://127.0.0.1:8094")
+$null = $api.Handle   # caches the handle; without it $api.ExitCode is EMPTY, even after exit
 
-1..60 | ForEach-Object { Start-Sleep 2; try { if ((iwr http://127.0.0.1:8094/alive -UseBasicParsing).StatusCode -eq 200) { "ready"; break } } catch {} }
+$apiDeadline = (Get-Date).AddSeconds(120)
+do {
+  Start-Sleep 2
+  if ($api.HasExited) {
+    Get-Content "$env:TEMP\auditworthy-api-err.txt" -TotalCount 5
+    throw "API exited ($($api.ExitCode)) before /alive answered. Its stderr is above; stop polling."
+  }
+  try { $ready = (iwr http://127.0.0.1:8094/alive -UseBasicParsing).StatusCode -eq 200 } catch { $ready = $false }
+} until ($ready -or (Get-Date) -gt $apiDeadline)
+if ($ready) { "ready" } else { throw "API is alive but /alive did not answer 200 within 120s." }
 
 # ... exercise it (§4) ...
 
@@ -116,6 +137,22 @@ Stop-Process -Id $api.Id -Force; docker rm -f auditworthy-pg-test
 
 > Port **5433**, not 5432, and container name `auditworthy-pg-test`: a stray stock-`postgres`
 > container on 5432 is the most common local collision, and it lacks pgvector.
+
+> **Do not delete the `pg_isready` wait (#71).** `pgvector/pgvector:pg17` opens the port, runs
+> initdb, then *restarts* the server — so a connection made during that window is accepted and then
+> torn down mid-TLS. The host dies about three seconds in with
+> `Npgsql … EndOfStreamException: Attempted to read past the end of the stream` at
+> `NpgsqlConnector.SetupEncryption`, exit code `-532462766`. Whether you lose this race depends on
+> how fast your machine initialises the container relative to ASP.NET startup, which is why the
+> block survived review: on a warm container, and on a fast machine even cold, it passes every time.
+
+> **Do not simplify the `/alive` loop back to `try { … } catch {}` (#71).** Mode B is the
+> *scripted-verification* path — it is how an agent proves a change works — so the loop must be able
+> to tell "not up yet" from "already dead". The old one could not: it swallowed every failure and
+> polled a corpse for two full minutes, then printed nothing at all. `$api.HasExited` is what makes
+> a crash report as a crash. `$null = $api.Handle` is not decoration either: without it
+> `$api.ExitCode` reads as an empty string, so the loop would name the failure and then fail to
+> number it.
 
 ### Ready signals
 
