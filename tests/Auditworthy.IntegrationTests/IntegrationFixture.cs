@@ -73,12 +73,20 @@ public sealed class IntegrationFixture : IAsyncLifetime
     /// An authorized HTTP client for the dev tenant. PREFER THIS: it goes through the real
     /// pipeline, so it is the only way to prove RBAC, the approval gate and the AG-UI protocol.
     /// Pass a narrower role to assert a 403.
+    /// <para>
+    /// <paramref name="tenant"/> is the tenant SLUG the caller presents. It defaults to the
+    /// pre-seeded dev tenant, which is what every RBAC and approval test wants; pass another slug to
+    /// work inside a tenant created during the test, which is the only way to prove what a second
+    /// customer actually sees (#78). A parameter rather than a hand-rolled client on purpose: a
+    /// caller assembled somewhere else re-introduces #64's constant actor, and
+    /// <c>DevAuthHeaderConventionTests</c> counts every call site in the repository.
+    /// </para>
     /// </summary>
-    public HttpClient AdminClient(string roles = "system_admin", string subject = "it-admin")
+    public HttpClient AdminClient(string roles = "system_admin", string subject = "it-admin", string tenant = "dev")
     {
         var client = Factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Dev-Subject", subject);
-        client.DefaultRequestHeaders.Add("X-Dev-Tenant", "dev");
+        client.DefaultRequestHeaders.Add("X-Dev-Tenant", tenant);
         client.DefaultRequestHeaders.Add("X-Dev-Roles", roles);
         client.DefaultRequestHeaders.Add("X-Dev-Name", DevDisplayName(subject));
         client.DefaultRequestHeaders.Add("X-Dev-Email", DevEmail(subject));

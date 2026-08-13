@@ -1,8 +1,10 @@
 using Auditworthy.Compliance;
 using Auditworthy.Host.Authorization;
 using Auditworthy.Host.Identity;
+using Auditworthy.Host.Tenancy;
 using Microsoft.AspNetCore.Authorization;
 using Plenipo.Application.Authorization;
+using Plenipo.Application.Commerce;
 using Plenipo.AspNetCore.Hosting;
 using Plenipo.AspNetCore.Identity;
 using Plenipo.AspNetCore.Modules;
@@ -36,6 +38,13 @@ builder.Services.AddScoped<IRequestEnricher, PersistedDisplayNameEnricher>();
 // permission string is absent from the spec. See AiDecisionDisclosureGuard for why this
 // is an additive IAuthorizationHandler rather than the "last wins" replacement used above.
 builder.Services.AddSingleton<IAuthorizationHandler, AiDecisionDisclosureGuard>();
+
+// A tenant created after startup gets the same starter control register the pre-seeded tenant gets
+// (#78). Two call sites, one register: the platform's own ITenantProvisionedHook covers
+// POST /api/admin/tenants/provision, and the middleware below covers the bare
+// POST /api/admin/tenants, which fires no hook at alpha.28. See the Tenancy folder.
+builder.Services.AddSingleton<NewTenantRegisterProvisioner>();
+builder.Services.AddPlenipoTenantProvisionedHook<StarterRegisterTenantProvisionedHook>();
 
 // ── Role baselines ────────────────────────────────────────────────────────────────────────────
 // These are the SHIPPED starting points; they are runtime-editable per tenant in the admin
@@ -79,6 +88,11 @@ builder.Services.AddPlenipoRole("compliance-owner",
 ]);
 
 var app = builder.Build();
+
+// TODO(plenipo#172) — before UsePlenipoPlatform() (which RunPlenipoPlatformAsync calls) so
+// that it wraps the platform's admin endpoints. It is a shim for the one tenant-creation path the
+// platform gives no hook for; the hook registration above is the supported seam.
+app.UseStarterRegisterForCreatedTenants();
 
 // RunPlenipoPlatformAsync = UsePlenipoPlatform() + InitializePlenipoAsync() + RunAsync().
 //
