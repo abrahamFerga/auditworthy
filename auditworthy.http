@@ -65,6 +65,19 @@ X-Dev-Tenant: {{tenant}}
 X-Dev-Roles: {{roles}}
 
 
+### The ADMT disclosure: what the agent did or proposed, with what human oversight. The platform
+### maps this for ANY authenticated tenant member; Auditworthy narrows it to `compliance.view`,
+### because in this product the rows carry register content — control reference, proposed status,
+### reason text (#70, AiDecisionDisclosureGuard). Swap {{roles}} for a role holding nothing and
+### this returns 403; before the guard it returned 200 with rows.
+GET {{base}}/api/platform/ai-decisions
+X-Dev-Subject: {{subject}}
+X-Dev-Name: {{name}}
+X-Dev-Email: {{email}}
+X-Dev-Tenant: {{tenant}}
+X-Dev-Roles: {{roles}}
+
+
 ### ────────────────────────────────────────────────────────────────── compliance API ───
 ### The Controls tab's data endpoint — the server-driven table behind /compliance/controls.
 ### Requires `compliance.view`.
