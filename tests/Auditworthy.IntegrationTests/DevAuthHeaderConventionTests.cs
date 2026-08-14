@@ -38,7 +38,14 @@ public sealed class DevAuthHeaderConventionTests
     /// parser has stopped matching or that callers were deleted. Update it in the same commit that
     /// adds or removes one.
     /// </summary>
-    private const int KnownDevAuthCallSites = 24;
+    /// <remarks>
+    /// 24 → 25 (#79): RUNBOOK.md §2 gained an identity check — <c>GET /api/platform/modules</c> must
+    /// name <c>compliance</c> — because the products on this machine share ports, so a bare
+    /// <c>/alive</c> 200 can come from a different product and read as a green verification of this
+    /// one. It sends X-Dev-Name and X-Dev-Email like every other caller; the count moved, the rule
+    /// did not.
+    /// </remarks>
+    private const int KnownDevAuthCallSites = 25;
 
     /// <summary>
     /// How far from an <c>X-Dev-Subject</c> its <c>X-Dev-Name</c> and <c>X-Dev-Email</c> may sit. A
