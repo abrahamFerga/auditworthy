@@ -1,5 +1,6 @@
 using Auditworthy.Compliance;
 using Auditworthy.Host.Authorization;
+using Auditworthy.Host.Diagnostics;
 using Auditworthy.Host.Identity;
 using Auditworthy.Host.Tenancy;
 using Microsoft.AspNetCore.Authorization;
@@ -38,6 +39,15 @@ builder.Services.AddScoped<IRequestEnricher, PersistedDisplayNameEnricher>();
 // permission string is absent from the spec. See AiDecisionDisclosureGuard for why this
 // is an additive IAuthorizationHandler rather than the "last wins" replacement used above.
 builder.Services.AddSingleton<IAuthorizationHandler, AiDecisionDisclosureGuard>();
+
+// TODO(plenipo#176) — drop this once the platform's exception handler honours the status a
+// BadHttpRequestException already carries. A request the framework could not read is a client
+// error, but app.UseExceptionHandler()'s ProblemDetails fallback writes the 500 already on the
+// response instead of the 400 the exception nominates, so an absent or unparseable AG-UI body
+// surfaced as a server fault (#72). ASP.NET offers every DI-registered IExceptionHandler the
+// exception before that fallback runs, which is why this needs no platform change and wraps no
+// platform middleware. See BadRequestEnvelopeExceptionHandler for the full ladder.
+builder.Services.AddExceptionHandler<BadRequestEnvelopeExceptionHandler>();
 
 // A tenant created after startup gets the same starter control register the pre-seeded tenant gets
 // (#78). Two call sites, one register: the platform's own ITenantProvisionedHook covers
