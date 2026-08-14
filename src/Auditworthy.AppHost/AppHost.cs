@@ -40,7 +40,20 @@ var redis = builder.AddRedis("plenipo-redis");
 // Deployment AI defaults live in the Host's appsettings (Development = Mock, Production = None);
 // real provider credentials are configured per tenant under Admin → AI Settings and stored
 // write-only in Plenipo's secret vault. There is no deployment-level key slot by design.
-var api = builder.AddProject<Projects.Auditworthy_Host>("auditworthy-api")
+// Auditworthy's own API port. Keep in step with RUNBOOK §2 and with
+// AppHostCompositionTests.ExpectedApiPort.
+const int ApiPort = 9433;
+
+// launchProfileName: null — the API's endpoints are declared HERE and nowhere else.
+//
+// Aspire derives a project resource's endpoints from its launch profile's `applicationUrl` when one
+// exists. This repo commits no launchSettings.json, but `dotnet run`/IDE tooling GENERATES one into
+// src/Auditworthy.Host/Properties/ unasked, and an untracked generated file then silently decides
+// which ports the API binds — different on every machine, absent in CI. Measured, not inferred
+// (#79): with a generated profile present the resource carried two endpoints on that profile's
+// random pair; with it removed the resource carried ZERO. Passing null makes the profile
+// unreadable, so the declaration below is the only source of truth in both cases.
+var api = builder.AddProject<Projects.Auditworthy_Host>("auditworthy-api", launchProfileName: null)
     .WithReference(platformDb)
     .WithReference(auditDb)
     .WithReference(redis)
@@ -57,12 +70,32 @@ var api = builder.AddProject<Projects.Auditworthy_Host>("auditworthy-api")
     // Waiting on the server keeps the real intent (do not start before Postgres accepts
     // connections) with no deadlock. Do not "fix" a slow first boot by putting these back.
     .WaitFor(postgres)
+    // DECLARE the endpoint. WithExternalHttpEndpoints() alone does not create one — it only flips
+    // IsExternal on endpoints that already exist, and this resource had none. That was #79's
+    // unverified inference; it is now an experiment, run against the shipped Aspire.Hosting 13.4.6
+    // assembly and kept as AppHostCompositionTests.Api_resource_declares_the_pinned_external_http_endpoint.
+    // With no endpoint declared, DCP launched the API with neither --urls nor a launch profile, so
+    // Kestrel fell back to the ASP.NET default and served on http://127.0.0.1:5000 — a port Aspire
+    // knows nothing about, absent from the dashboard, and unproxyable.
+    //
+    // FIXED host port 9433, on the same reasoning as the Postgres pin above, and for one more:
+    // several Plenipo products run scheduled loops on this machine, and :5000 (and the RUNBOOK's
+    // Mode B :8094) are claimed by more than one of them. An /alive probe against a shared port can
+    // answer 200 from a DIFFERENT product and read as a green verification of this one. 9433 is
+    // Auditworthy's alone — no other product in the fleet declares it. Do NOT unpin this to dodge a
+    // bind conflict: the conflict is the guard working. Confirm identity, never liveness alone —
+    // GET /api/platform/modules must list `compliance`.
+    //
+    // isProxied: false so `port` IS the port Kestrel binds, rather than a proxy fronting a random
+    // target port. One address, printable in the RUNBOOK, and a collision fails loudly at bind.
+    .WithHttpEndpoint(port: ApiPort, targetPort: ApiPort, isProxied: false)
     .WithExternalHttpEndpoints();
 
 // Development, explicitly, for a LOCAL RUN ONLY — and both halves of that are load-bearing.
 //
 // Why it is needed at all: Aspire does NOT hand a project resource the AppHost's own environment,
-// and neither project has a launchSettings.json, so without this the API starts in **Production**.
+// and this resource is declared `launchProfileName: null`, so no launch profile can supply one
+// either — without this the API starts in **Production**.
 // The platform then refuses to boot — the X-Dev-* dev-auth fallback is Development-only, and no
 // "Auth" section (Entra External ID Authority/Audience) is configured here, by design, since this
 // stack runs keyless. AddPlenipoPlatform() throws, and the failure is silent in the worst way:

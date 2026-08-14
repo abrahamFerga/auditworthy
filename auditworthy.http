@@ -6,11 +6,16 @@
 # WHEN YOU ADD AN ENDPOINT, ADD ITS REQUEST HERE IN THE SAME PR. A catalog that lags the code is
 # how the next agent concludes a working endpoint is missing.
 #
-# @base — under Aspire the API port is dynamic: take the external HTTP endpoint of the
-# `auditworthy-api` resource from the dashboard and paste it here. Under RUNBOOK.md Mode B it is
-# whatever you passed to --urls (8094 below).
+# @base — RUNBOOK.md Mode A (the default). The API port is PINNED in AppHost.cs, so 9433 is correct
+# on every machine and nothing has to be pasted here. This used to say the port was dynamic and told
+# you to take the endpoint off the Aspire dashboard; there was no such endpoint to take, and the API
+# was really on the ASP.NET default :5000 (#79). Under Mode B it is whatever you passed to --urls
+# (8094 there) — change the line below if you are running headless.
+#
+# Ports are NOT unique across the products on this machine (:8094 is shared), so a 200 from /alive
+# can come from another product. `GET /api/platform/modules` must name `compliance`.
 
-@base   = http://127.0.0.1:8094
+@base   = http://127.0.0.1:9433
 @module = compliance
 
 # Swap the role to assert a boundary: compliance-reader (reads only), compliance-analyst (may

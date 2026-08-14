@@ -19,3 +19,10 @@ appsettings.*.local.json
 # The vendored platform packages ARE committed on purpose (.packages/) -- they publish
 # only to a feed that needs a PAT, so vendoring is what keeps `dotnet restore` working
 # on a bare clone. Do not add .packages/ here.
+
+# Tooling-generated launch profiles, never committed. `dotnet run` and the IDEs write one into
+# src/*/Properties/ unasked, and Aspire reads its `applicationUrl` to derive a project resource's
+# endpoints -- so a committed one would silently decide which ports the API binds, differently on
+# every machine and absent in CI (#79). AppHost.cs passes `launchProfileName: null` so the file
+# cannot be read even when it exists; this line keeps it from drifting into a commit as well.
+**/Properties/launchSettings.json

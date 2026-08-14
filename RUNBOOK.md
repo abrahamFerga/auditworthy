@@ -51,9 +51,39 @@ dotnet run --project src/Auditworthy.AppHost
 ```
 
 Brings up Postgres (`plenipo-platform` + `plenipo-audit` databases), Redis, and the API, then opens
-the **Aspire dashboard** (URL printed to the console, with a login token). Take the API's external
-HTTP endpoint from the dashboard resource **`auditworthy-api`**; that base URL is what every call
-below targets.
+the **Aspire dashboard** (URL printed to the console, with a login token).
+
+**The API's base URL is `http://127.0.0.1:9433`.** It is pinned in `AppHost.cs`, so it is the same
+on every machine and in every run — you do not have to go and find it, and every call below targets
+it. The dashboard resource **`auditworthy-api`** lists the same address.
+
+> This used to read *"take the API's external HTTP endpoint from the dashboard resource"*, and that
+> instruction could not be followed: there was no such endpoint to take. `WithExternalHttpEndpoints()`
+> only marks endpoints that already exist — it creates none — so the API resource had none at all,
+> and Kestrel fell back to the ASP.NET default `:5000`, which Aspire never knew about (#79). The
+> endpoint is now declared explicitly.
+
+**Confirm identity, never liveness alone.** Several Plenipo products run scheduled loops on this
+machine and their runbooks share ports (Mode B's `:8094` is used by more than one), so a bare
+`/alive` 200 can come from a *different product* and read as a green verification of this one. 9433
+is Auditworthy's alone, but make the check positive regardless — this must name `compliance`:
+
+```bash
+curl -s http://127.0.0.1:9433/api/platform/modules \
+  -H "X-Dev-Subject: dev-user" -H "X-Dev-Tenant: dev" -H "X-Dev-Roles: system_admin" \
+  -H "X-Dev-Name: Dev User" -H "X-Dev-Email: dev-user@auditworthy.local"
+```
+
+**Do not unpin 9433 to dodge a bind conflict.** A conflict means another Auditworthy AppHost is
+already up; the loud failure is the guard working. Kill the stale one — and note that a still-running
+AppHost also locks `Auditworthy.AppHost.exe`, which fails the next build with `MSB3021`/`MSB3027`
+("used by another process"), an error that reads like a compile break and is not one.
+
+**No `launchSettings.json`, by design.** `dotnet run` and the IDEs generate one into
+`src/Auditworthy.Host/Properties/` unasked, and Aspire otherwise reads its `applicationUrl` to derive
+the API's endpoints — a generated, untracked, per-machine file silently deciding the ports. The
+AppHost declares the resource with `launchProfileName: null` so the file cannot be read even when it
+exists, and `.gitignore` keeps it out of commits. If you find one, you can delete it; nothing reads it.
 
 **`dotnet run` and `aspire run` are not equivalent.** They start the same stack, but an AppHost
 launched with `dotnet run` is **invisible to the Aspire MCP** — which is the entire agent-readable
