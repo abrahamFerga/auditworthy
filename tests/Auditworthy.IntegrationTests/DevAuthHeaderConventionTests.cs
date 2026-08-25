@@ -71,10 +71,29 @@ public sealed class DevAuthHeaderConventionTests
     private static readonly Regex SendsName = Sends("X-Dev-Name");
     private static readonly Regex SendsEmail = Sends("X-Dev-Email");
 
-    /// <summary>Build output, vendored packages, and the throwaway agent worktrees — which are
-    /// whole second copies of this repo and would otherwise double every count here.</summary>
+    /// <summary>
+    /// Build output, vendored packages, and the throwaway agent worktrees — which are whole second
+    /// copies of this repo and would otherwise double every count here.
+    /// <para>
+    /// <c>wwwroot</c> joined this list when the platform's two SPAs were vendored into it. It is the
+    /// same category as <c>dist</c> and <c>.packages</c> beside it — minified third-party build
+    /// output, not a caller anyone here wrote — and it is checked in only because this product
+    /// distributes the UI without an npm registry (RUNBOOK §4). Without the skip, the walk reads a
+    /// 600 kB single-line bundle and reports it as call site 25.
+    /// </para>
+    /// <para>
+    /// <b>What the bundle actually contains, since skipping it is not the same as it being clean:</b>
+    /// <c>@plenipo/client</c>'s dev-auth block is
+    /// <c>{"X-Dev-Subject":"dev-user","X-Dev-Tenant":"dev","X-Dev-Roles":"system_admin","X-Dev-Name":"Dev User"}</c>
+    /// — it genuinely sends no <c>X-Dev-Email</c>. That is a platform-owned file this repo must never
+    /// edit, and #64's harm does not reach it: the guard exists to stop TWO subjects collapsing into
+    /// one actor, and the shell only ever sends the single fixed subject <c>dev-user</c>, so there is
+    /// no second identity to confuse it with. If the shell ever gains a subject switcher, this skip
+    /// stops being safe and the email becomes a real platform request.
+    /// </para>
+    /// </summary>
     private static readonly string[] SkippedDirectories =
-        [".git", ".vs", ".idea", "bin", "obj", "dist", "node_modules", "data", "worktrees", ".packages"];
+        [".git", ".vs", ".idea", "bin", "obj", "dist", "node_modules", "data", "worktrees", ".packages", "wwwroot"];
 
     private static readonly string[] TextExtensions =
         [".http", ".md", ".cs", ".ps1", ".sh", ".py", ".ts", ".tsx", ".js", ".json", ".yml", ".yaml"];

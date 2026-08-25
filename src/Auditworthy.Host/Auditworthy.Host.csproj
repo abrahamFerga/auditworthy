@@ -20,4 +20,18 @@
     <ProjectReference Include="..\Auditworthy.Compliance\Auditworthy.Compliance.csproj" />
   </ItemGroup>
 
+  <!-- THE UI MUST BE A REAL DIRECTORY IN THE OUTPUT, not just a static-web-asset manifest entry.
+       The Web SDK normally serves wwwroot through the staticwebassets manifest and copies nothing
+       to bin/. But the platform mounts both SPAs with a PhysicalFileProvider guarded by
+       Directory.Exists(ContentRootPath + "wwwroot/app" | "wwwroot/admin") — a physical-path check
+       the manifest does not satisfy. ContentRoot is the PROJECT dir under `dotnet run` but the BIN
+       dir when the dll is launched directly (RUNBOOK §2 Mode B, and any publish), so without this
+       the UI silently vanishes in exactly the mode CI and scripted verification use, and the host
+       logs only a mild "assets not found" info line while serving a bare 404.
+       `Update` (not `Include`) because the Web SDK already globs these in as Content; Include would
+       duplicate every file and fail the build. -->
+  <ItemGroup>
+    <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
