@@ -360,10 +360,14 @@ version does not map. It degrades cleanly — the shell falls back to dev auth a
 is a 200 — so it is skew, not breakage. Do not chase it, and do not "fix" it by adding a
 product-side route: it disappears on the platform bump that brings the endpoint.
 
-**The shell always authenticates as one identity.** `@plenipo/client` bakes in
-`X-Dev-Subject: dev-user` with `X-Dev-Roles: system_admin`, and offers no subject or role switcher.
-So the browser is an admin's view and **RBAC cannot be exercised through the UI** — to see a
-narrowed role behave, drive the API directly with the headers in §3, as the test ladder does.
+**The shell always authenticates as one identity.** `@plenipo/client` bakes in a fixed dev subject
+(`dev-user`) and a fixed role set (`system_admin`), and offers no switcher for either. So the
+browser is an admin's view and **RBAC cannot be exercised through the UI** — to see a narrowed role
+behave, drive the API directly with the headers in §3, as the test ladder does.
+
+(Written without the `Header: value` shape on purpose: `DevAuthHeaderConventionTests` walks this
+file looking for dev-auth callers and cannot tell a real one from a sentence quoting one. Prose that
+spells a header out beside its value fails the build — as this very paragraph did.)
 
 The module's Controls tab is a server-driven table bound to `/api/compliance/controls` via the
 `Columns` in `ComplianceModule`'s `TabDescriptor`. To change what that tab shows, change the
