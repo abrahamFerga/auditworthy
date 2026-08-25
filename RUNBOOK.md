@@ -31,9 +31,14 @@ If both are green and you exercised the change through the API, you are done. If
 | **.NET 10 SDK** | pinned in `global.json` (`10.0.100`, `rollForward: latestFeature`) | `dotnet --version` → `10.*` |
 | **Docker Desktop, running** | Postgres + Redis containers; Testcontainers for rungs 3–4 | `docker ps` |
 
-No AI key, and no frontend toolchain. v1 ships **no bespoke UI** — the module's tabs are
-server-driven and render in the platform shell, so there is no `frontend/` directory, no `pnpm`
-step, and no `docker-compose.yml` in this repo.
+No AI key, and no frontend toolchain to run the product. v1 ships **no bespoke UI** — the module's
+tabs are server-driven and render in the platform shell, so there is no `frontend/` directory, no
+React file to edit and no `docker-compose.yml` in this repo.
+
+That does **not** mean there is no UI: the platform's workspace shell and admin console are served
+by this host at `/` and `/admin`, from built assets committed under
+`src/Auditworthy.Host/wwwroot/`. `dotnet build` is enough to serve them. You only need node and
+pnpm to *regenerate* them after a platform upgrade — see [§4 The UI](#the-ui).
 
 The assistant runs on Plenipo's dependency-free **`Mock` provider**
 (`src/Auditworthy.Host/appsettings.Development.json`), which streams deterministic replies **and
@@ -309,10 +314,60 @@ will never be callable, and nothing else will tell you.
 
 ### The UI
 
-There is none to run. The workspace shell and admin console are served by the platform; the
-module's Controls tab is a server-driven table bound to `/api/compliance/controls` via the
-`Columns` in `ComplianceModule`'s `TabDescriptor`. To change what the tab shows, change the
-manifest and the endpoint — not a React file.
+**There is a UI, and this host serves it.** Browse to the API's own base URL:
+
+| URL | What | Source |
+|---|---|---|
+| `/` | the workspace shell — module switcher, Chat, the module's tabs | `@plenipo/ui` |
+| `/admin` | the admin console — roles, users, audit, AI settings, tenants | `@plenipo/admin-ui` |
+
+Nothing else to start: same origin as the API, so no second server, no CORS, no npm registry.
+
+**But the platform only serves them if their built output is physically present**, in
+`src/Auditworthy.Host/wwwroot/app` and `.../wwwroot/admin`. Both SPAs are **platform** packages —
+this repo still has no frontend *source*, no `frontend/` directory and no React file to edit — so
+their `dist/` output is **committed here**, the same "no registry" reasoning that vendors Plenipo's
+nupkgs in `.packages/`. A fresh clone serves the UI with nothing but `dotnet build`.
+
+When the assets are missing the host does **not** fail: it logs two mild `info` lines and serves a
+bare 404 at `/`. If the UI is gone, read stdout for:
+
+```text
+Plenipo domain UI assets not found at …\wwwroot/app; the SPA will not be served from this host.
+```
+
+To regenerate them after a platform upgrade — the only time you need node and pnpm:
+
+```powershell
+pwsh scripts/build-ui.ps1                     # finds ../plenipo, or -PlatformPath / $env:PLENIPO_PATH
+dotnet build src/Auditworthy.Host/Auditworthy.Host.csproj
+```
+
+Two things that build script exists to stop you getting wrong, both of which serve a UI that *looks*
+fine and is dead:
+
+- **`VITE_API_BASE` must be the empty string, not unset.** `normalizeApiBase` only falls back to its
+  `http://localhost:8080` dev default when the value is *nullish*, so `""` is meaningful. Unset it
+  and every request from the served page goes to `:8080` and is refused: shell renders, no data,
+  admin console stuck on "Loading…". The script asserts the built bundle contains `baseUrl:""` and
+  fails the build if not.
+- **`pnpm build:app`, not `pnpm build`, for `@plenipo/ui`** — plain `build` emits the npm *library*,
+  which has no `index.html`.
+
+**One expected 404 in the browser console: `GET /api/platform/auth-config`.** The SPA is built from
+a platform checkout newer than the vendored `alpha.28` API (#69), and asks for an endpoint this
+version does not map. It degrades cleanly — the shell falls back to dev auth and every other call
+is a 200 — so it is skew, not breakage. Do not chase it, and do not "fix" it by adding a
+product-side route: it disappears on the platform bump that brings the endpoint.
+
+**The shell always authenticates as one identity.** `@plenipo/client` bakes in
+`X-Dev-Subject: dev-user` with `X-Dev-Roles: system_admin`, and offers no subject or role switcher.
+So the browser is an admin's view and **RBAC cannot be exercised through the UI** — to see a
+narrowed role behave, drive the API directly with the headers in §3, as the test ladder does.
+
+The module's Controls tab is a server-driven table bound to `/api/compliance/controls` via the
+`Columns` in `ComplianceModule`'s `TabDescriptor`. To change what that tab shows, change the
+manifest and the endpoint — not a React file. That part was always true.
 
 ## 5. Observe
 

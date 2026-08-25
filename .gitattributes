@@ -1,1 +1,6 @@
 .github/workflows/*.lock.yml linguist-generated=true merge=ours
+# Vendored SPA build output (RUNBOOK §4) — stored and checked out byte-for-byte as the bundler
+# emitted it. Without -text these are classified as text, so git rewrites line endings per
+# platform: the same commit then serves different bytes on Windows and Linux, and regenerating
+# the UI produces a whole-file diff that hides the real change.
+src/Auditworthy.Host/wwwroot/** -text
