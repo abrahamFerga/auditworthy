@@ -125,4 +125,60 @@ public sealed class AppHostCompositionTests
             "IsDevelopment(), so that is a deployed API trusting any caller's claimed tenant and " +
             "role. Wrap the WithEnvironment call in `if (builder.ExecutionContext.IsRunMode)`.");
     }
+
+    /// <summary>
+    /// The API resource declares an HTTP endpoint of its own (#79).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>WithExternalHttpEndpoints()</c> reads as if it creates one. It does not — it marks
+    /// endpoints that ALREADY EXIST as external, and is a silent no-op on a resource that has none.
+    /// Aspire otherwise derives a project's endpoints from its <c>launchSettings.json</c>, so with
+    /// that file absent the API was declared with no endpoint at all: Aspire injected no
+    /// <c>ASPNETCORE_URLS</c>, Kestrel fell back to its own default, and the process bound
+    /// <c>http://localhost:5000</c> — unproxied, unknown to the orchestrator, and absent from the
+    /// dashboard. RUNBOOK §2 Mode A tells a reader to "take the API's external HTTP endpoint from
+    /// the dashboard resource <c>auditworthy-api</c>", and there was none to take.
+    /// </para>
+    /// <para>
+    /// <b>Why this is a test and not a comment.</b> The file that fixes it,
+    /// <c>src/Auditworthy.Host/Properties/launchSettings.json</c>, is exactly the kind of file an
+    /// IDE regenerates and a <c>.gitignore</c> swallows — it was present and UNTRACKED in the
+    /// original checkout, which is why Mode A worked for whoever ran it there and for nobody else.
+    /// A fresh clone, CI, and a git worktree all got the broken behaviour. Asserting the endpoint
+    /// here means deleting or un-tracking that file fails the build instead of quietly moving the
+    /// API back to :5000 on every machine except one.
+    /// </para>
+    /// <para>
+    /// Asserted on the model rather than by starting anything: no container is pulled or run.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Api_resource_declares_an_http_endpoint()
+    {
+        var builder = await DistributedApplicationTestingBuilder
+            .CreateAsync<Projects.Auditworthy_AppHost>();
+
+        await using var app = await builder.BuildAsync();
+
+        var model = app.Services.GetRequiredService<DistributedApplicationModel>();
+        var api = Assert.Single(
+            model.Resources.OfType<ProjectResource>(),
+            r => r.Name == ApiResourceName);
+
+        var endpoints = api.Annotations.OfType<EndpointAnnotation>().ToArray();
+
+        Assert.True(
+            endpoints.Any(e => string.Equals(e.UriScheme, "http", StringComparison.OrdinalIgnoreCase)),
+            $"'{ApiResourceName}' declares no http endpoint, so Aspire hands it no ASPNETCORE_URLS "
+            + "and Kestrel falls back to its default http://localhost:5000 — unproxied, and with "
+            + "nothing for the dashboard to show or RUNBOOK Mode A to point at. "
+            + "WithExternalHttpEndpoints() does NOT create one; it only marks existing endpoints "
+            + "external. Restore the applicationUrl in "
+            + "src/Auditworthy.Host/Properties/launchSettings.json (and keep it TRACKED), or "
+            + "declare the endpoint explicitly in AppHost.cs. "
+            + $"Declared endpoints: {(endpoints.Length == 0
+                ? "(none)"
+                : string.Join(", ", endpoints.Select(e => $"{e.Name}/{e.UriScheme}")))}.");
+    }
 }
