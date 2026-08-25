@@ -49,6 +49,15 @@ builder.Services.AddSingleton<IAuthorizationHandler, AiDecisionDisclosureGuard>(
 // platform middleware. See BadRequestEnvelopeExceptionHandler for the full ladder.
 builder.Services.AddExceptionHandler<BadRequestEnvelopeExceptionHandler>();
 
+// A permission denial is written to the audit trail (#25). The platform declares the AccessDenied
+// event type and the IAuditLog method to append one, but never calls it for an authorization
+// failure, so every 403 in this product was invisible to the one surface a compliance owner would
+// use to notice probing. alpha.28 registers NO IAuthorizationMiddlewareResultHandler of its own
+// (verified against the vendored dll), so this fills an empty seat rather than displacing anything
+// and delegates to ASP.NET's stock handler. See DeniedAccessAuditor for the upgrade hazard when a
+// later platform DOES ship one.
+builder.Services.AddSingleton<IAuthorizationMiddlewareResultHandler, DeniedAccessAuditor>();
+
 // A tenant created after startup gets the same starter control register the pre-seeded tenant gets
 // (#78). Two call sites, one register: the platform's own ITenantProvisionedHook covers
 // POST /api/admin/tenants/provision, and the middleware below covers the bare
