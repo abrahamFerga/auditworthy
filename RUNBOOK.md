@@ -56,9 +56,20 @@ dotnet run --project src/Auditworthy.AppHost
 ```
 
 Brings up Postgres (`plenipo-platform` + `plenipo-audit` databases), Redis, and the API, then opens
-the **Aspire dashboard** (URL printed to the console, with a login token). Take the API's external
-HTTP endpoint from the dashboard resource **`auditworthy-api`**; that base URL is what every call
-below targets.
+the **Aspire dashboard** (URL printed to the console, with a login token).
+
+The API's base URL is **`http://localhost:62063`** (and `https://localhost:62062`) — stable across
+runs, and what every call below targets. It is declared by
+[`src/Auditworthy.Host/Properties/launchSettings.json`](src/Auditworthy.Host/Properties/launchSettings.json),
+which is **tracked on purpose**: Aspire derives a project's endpoints from that file, and
+`WithExternalHttpEndpoints()` in the AppHost does *not* create one — it only marks endpoints that
+already exist as external, and is a silent no-op on a resource that has none. Delete or un-track
+that file and the API is declared with no endpoint at all: Aspire injects no `ASPNETCORE_URLS`,
+Kestrel falls back to `http://localhost:5000` unproxied, and the dashboard resource
+**`auditworthy-api`** shows no URL to click (#79). `AppHostCompositionTests` fails the build if that
+happens, because the file is exactly the kind an IDE regenerates and a `.gitignore` swallows.
+
+The dashboard is still the place to read logs and traces per resource.
 
 **`dotnet run` and `aspire run` are not equivalent.** They start the same stack, but an AppHost
 launched with `dotnet run` is **invisible to the Aspire MCP** — which is the entire agent-readable
@@ -360,10 +371,14 @@ version does not map. It degrades cleanly — the shell falls back to dev auth a
 is a 200 — so it is skew, not breakage. Do not chase it, and do not "fix" it by adding a
 product-side route: it disappears on the platform bump that brings the endpoint.
 
-**The shell always authenticates as one identity.** `@plenipo/client` bakes in
-`X-Dev-Subject: dev-user` with `X-Dev-Roles: system_admin`, and offers no subject or role switcher.
-So the browser is an admin's view and **RBAC cannot be exercised through the UI** — to see a
-narrowed role behave, drive the API directly with the headers in §3, as the test ladder does.
+**The shell always authenticates as one identity.** `@plenipo/client` bakes in a fixed dev subject
+(`dev-user`) and a fixed role set (`system_admin`), and offers no switcher for either. So the
+browser is an admin's view and **RBAC cannot be exercised through the UI** — to see a narrowed role
+behave, drive the API directly with the headers in §3, as the test ladder does.
+
+(Written without the `Header: value` shape on purpose: `DevAuthHeaderConventionTests` walks this
+file looking for dev-auth callers, and cannot tell a real one from a sentence quoting one. Prose
+that spells a header out beside its value fails the build — as this paragraph did, first time.)
 
 The module's Controls tab is a server-driven table bound to `/api/compliance/controls` via the
 `Columns` in `ComplianceModule`'s `TabDescriptor`. To change what that tab shows, change the
@@ -542,6 +557,8 @@ that means the diagnosis is wrong, not the fix.
 | `RUN_ERROR "Unknown module"` | module id must be `compliance` |
 | `42P01: relation "platform.background_jobs" does not exist`, endless 500s | `Program.cs` was reduced to `app.UsePlenipoPlatform(); app.Run();`. Only `await app.RunPlenipoPlatformAsync()` also runs `InitializePlenipoAsync`, which applies the migrations. It looks like a job bug; it is a missing migration step |
 | `42P01: relation "compliance.<table>" does not exist` | the module's own schema is never created: `ComplianceModule` must implement `IModule.MigrateAsync` (and `SeedAsync`). The platform migrates *itself* and then calls each module — it cannot invent your DDL |
+| Aspire dashboard shows **no URL** for `auditworthy-api`, and the app answers on `:5000` instead | the API is declared with **no endpoint**, so Aspire injects no `ASPNETCORE_URLS` and Kestrel binds its own default — unproxied and invisible to the orchestrator (#79). Cause: `src/Auditworthy.Host/Properties/launchSettings.json` is missing or untracked. Aspire reads a project's endpoints from it, and `WithExternalHttpEndpoints()` does **not** create one — it only marks existing endpoints external, and is a silent no-op when there are none. Restore that file (keep it TRACKED) or declare the endpoint in `AppHost.cs`. `AppHostCompositionTests.Api_resource_declares_an_http_endpoint` fails for exactly this |
+| Docker commands fail: `failed to connect to the docker API at npipe:…dockerDesktopLinuxEngine` | Docker Desktop is not running. Everything here needs it (Postgres + Redis are containers, and rungs 3–4 use Testcontainers). Start Docker Desktop and wait for the daemon — a cold start takes **up to ~2 minutes** before `docker info` answers; `dotnet run` before then fails in ways that look like app bugs |
 | Aspire: containers up, API not there yet, stack "hangs" after the banner | **read the API's log, don't wait it out** (§2 Mode A) — the dashboard's `/consolelogs/resource/auditworthy-api`, or the newest `%TEMP%\aspire-dcp*\<guid>_err`. Then: someone removed the `.WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")` the AppHost applies **inside its `if (builder.ExecutionContext.IsRunMode)` block**, so the API starts in Production and `AddPlenipoPlatform()` throws on dev-auth (#54 — `AppHostCompositionTests` fails for this). Exporting the variable in your own shell will **not** rescue it: Aspire does not propagate the AppHost's process environment to a project resource, measured 2026-08-08. Equally, do not "fix" a publish-mode complaint by unwrapping that `if` — the guard is deliberate and its own test asserts the key is absent under a publish operation; a stale Postgres **data volume** initialized with a different password (`docker volume rm auditworthy-pg-data`; dev data is throwaway); or someone re-added `WaitFor` on the two **database** resources — wait for the postgres **server**, never the databases, or the wait is circular |
 | Aspire: `auditworthy-api` appears and then exits, with nothing in the AppHost console | project logs go to the **dashboard**, not to the terminal you launched from — open `/consolelogs/resource/auditworthy-api`, or relaunch with `aspire run` and read them through the MCP. Reproduce the same boot in seconds with Mode B, which shows the exception on stderr |
 | Aspire refuses to start: *"the 'applicationUrl' setting must be an https address"* | you pinned the dashboard with an `http` URL. Use `--ASPNETCORE_URLS=https://localhost:18888` |
