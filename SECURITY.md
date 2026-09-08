@@ -31,12 +31,15 @@ as a security change.
 
 The rule has a converse, and it was open until #76: **whoever approves must themselves be entitled
 to the action they are approving.** `chat.approvals.manage` alone is approval *authority*, not
-authority to perform the write. At Plenipo `0.1.0-alpha.28` the platform's `ApprovalExecutor` runs a
-parked call without re-reading the tool's own permission, so a role holding nothing but approval
-authority — or the platform's own `tenant_admin` — could commit a write RBAC-before-the-model had
-refused it seconds earlier. Until the platform closes that (`TODO(plenipo#145)`), every
-approval-gated tool in this module carries its own execution-time check via `PermissionGatedTool`,
-and both halves of the rule are asserted at runtime in `ApprovalLaneRbacTests`.
+authority to perform the write. This product shipped a local shim for it (`PermissionGatedTool`,
+`plenipo#145`) because Plenipo `0.1.0-alpha.28`'s `ApprovalExecutor` ran a parked call without
+re-reading the tool's own permission, so a role holding nothing but approval authority — or the
+platform's own `tenant_admin` — could commit a write RBAC-before-the-model had refused it seconds
+earlier. **Plenipo `0.1.0-alpha.29` closed it**: the platform refuses such an approver with a `403`
+and an `AccessDenied` audit event *before* any module code runs, and executes a released approval as
+the requester with the permissions snapshotted at park time. The shim is gone; both halves of the
+rule are asserted at runtime in `ApprovalLaneRbacTests` and, from the platform's own conformance
+kit, in `PlenipoSpineConformance` S03 and S04.
 
 ## What this product does not do
 

@@ -1,10 +1,4 @@
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Plenipo.Infrastructure.Context;
-using Plenipo.Infrastructure.Persistence;
-using Testcontainers.PostgreSql;
+using Plenipo.Testing;
 using Xunit;
 
 namespace Auditworthy.IntegrationTests;
@@ -13,82 +7,100 @@ namespace Auditworthy.IntegrationTests;
 /// The real Auditworthy host on a throwaway Postgres: platform + module migrations run, the dev
 /// tenant and seed data land, the job processor and hosted services start. Everything is real
 /// except the AI provider (Mock) — the same keyless posture the Plenipo platform's own suite uses.
+/// <para>
+/// The container, the <c>WebApplicationFactory</c>, the dev-auth clients and
+/// <see cref="PlenipoHostFixture{TProgram}.AuthorizedScopeAsync"/> now come from
+/// <b>Plenipo.Testing</b> — the platform's conformance kit, shipped at <c>$(PlenipoVersion)</c> —
+/// rather than from a copy maintained here (plenipo#189 / auditworthy#101). What survives in this
+/// file is only what is Auditworthy's own: the <see cref="Contract"/> the kit's invariant packs run
+/// against, the pg17 image this product ships on, and the #64 dev-auth identity derivation.
+/// </para>
 /// </summary>
-public sealed class IntegrationFixture : IAsyncLifetime
+public sealed class IntegrationFixture : PlenipoHostFixture<Program>
 {
-    private PostgreSqlContainer? _postgres;
+    /// <summary>
+    /// What the kit needs to know about this product, read from the module manifest and
+    /// <c>Program.cs</c>'s role baselines — never invented.
+    /// <list type="bullet">
+    /// <item><description><c>list_controls</c> is the read: audited, no approval.</description></item>
+    /// <item><description><c>propose_control_change</c> is the write: <c>RequiresApproval = true</c> on
+    /// both the descriptor and the <c>ModuleTool</c>.</description></item>
+    /// <item><description><c>compliance-owner</c> is the accountable role — it alone holds
+    /// <c>chat.approvals.manage</c> beside <c>tools.compliance.*</c>, so it is the only product role
+    /// that can both park a write and release one. Deliberately not <c>system_admin</c>: the wildcard
+    /// would prove the platform's own role rather than this product's.</description></item>
+    /// <item><description><c>compliance-reader</c> is the narrow role: it may chat and read the
+    /// register, holds neither the write tool's permission nor <c>chat.approvals.manage</c>.</description></item>
+    /// </list>
+    /// <para>
+    /// <b><c>WritePrompt</c> is supplied rather than defaulted, and it is not decoration.</b> The
+    /// kit's default turn ("Please propose control change for me, using a tool.") routes correctly,
+    /// but the Mock provider fills required string arguments it cannot read out of the message with
+    /// the placeholder <c>"example"</c> — and <c>propose_control_change</c> validates its arguments:
+    /// <c>status</c> must parse as a <c>ControlStatus</c> and <c>reference</c> must name a control
+    /// that exists. So the parked write always FAILED on release, and <c>S03</c>, which requires the
+    /// approve call to succeed and one audited execution attributed to the requester, went red with
+    /// <c>422 Unprocessable Entity</c> — the product's own
+    /// <c>ChatAndApprovalTests.An_approved_write_that_cannot_be_applied_does_not_resolve_as_applied</c>
+    /// asserts that same 422 deliberately, so this was a real product behaviour, not a kit bug.
+    /// The Mock fills required string params from QUOTED spans in parameter order, so quoting the
+    /// three arguments hands the tool a reference the starter register really holds and a status
+    /// that really parses. S03 then proves the whole lane end to end instead of proving that a
+    /// placeholder is not a control reference. Keep the quoted values in declaration order —
+    /// <c>reference</c>, <c>status</c>, <c>reason</c> — and keep the word "controls" out of the
+    /// sentence, or the Mock's name-token scoring routes the turn to <c>list_controls</c> instead.
+    /// </para>
+    /// </summary>
+    public override ProductContract Contract { get; } = new(
+        ModuleId: "compliance",
+        ReadTool: "list_controls",
+        WriteTool: "propose_control_change",
+        ApproverRole: "compliance-owner",
+        NarrowRole: "compliance-reader",
+        ReadEndpoints: ["/api/compliance/controls"],
+        WritePrompt: "Please propose control change: 'A.5.1' to 'Effective' because "
+            + "'the platform conformance kit released this parked write'.");
 
-    public WebApplicationFactory<Program> Factory { get; private set; } = default!;
-
-    public async Task InitializeAsync()
-    {
-        // Ryuk is the Testcontainers reaper container. It needs the Docker socket mounted, which
-        // Docker Desktop on Windows does not always grant; the containers this fixture creates are
-        // disposed explicitly below, so the reaper buys nothing here and costs a startup failure.
-        Environment.SetEnvironmentVariable("TESTCONTAINERS_RYUK_DISABLED", "true");
-
-        _postgres = new PostgreSqlBuilder()
-            // pgvector, not stock postgres: the platform's RAG migration creates a vector column at
-            // startup and fails on the `vector` type without the extension. Keep this major in sync
-            // with the AppHost (src/Auditworthy.AppHost/AppHost.cs pins pg17) — a product that runs
-            // on pg17 and tests on pg16 is testing something it does not ship.
-            .WithImage("pgvector/pgvector:pg17")
-            .WithDatabase("plenipo_platform")
-            .WithUsername("postgres")
-            .WithPassword("postgres")
-            .Build();
-        await _postgres.StartAsync();
-
-        // The platform resolves both databases by connection-string NAME. In production they are
-        // separate databases (see the AppHost); one container is enough to exercise the schemas.
-        Environment.SetEnvironmentVariable("ConnectionStrings__plenipo-platform", _postgres.GetConnectionString());
-        Environment.SetEnvironmentVariable("ConnectionStrings__plenipo-audit", _postgres.GetConnectionString());
-
-        Factory = new AuditworthyAppFactory();
-
-        // The first request boots the host (migrations + seeding); the authenticated call makes the
-        // request enricher provision the dev-tenant user that AuthorizedScopeAsync relies on.
-        using var warmup = AdminClient();
-        (await warmup.GetAsync("/alive")).EnsureSuccessStatusCode();
-        (await warmup.GetAsync("/api/platform/modules")).EnsureSuccessStatusCode();
-    }
-
-    public async Task DisposeAsync()
-    {
-        Environment.SetEnvironmentVariable("ConnectionStrings__plenipo-platform", null);
-        Environment.SetEnvironmentVariable("ConnectionStrings__plenipo-audit", null);
-
-        if (Factory is not null)
-        {
-            await Factory.DisposeAsync();
-        }
-
-        if (_postgres is not null)
-        {
-            await _postgres.DisposeAsync();
-        }
-    }
+    /// <summary>
+    /// pgvector, not stock postgres: the platform's RAG migration creates a vector column at startup
+    /// and fails on the <c>vector</c> type without the extension. Pinned to pg17 rather than taking
+    /// the kit's pg16 default, to stay in step with the AppHost
+    /// (<c>src/Auditworthy.AppHost/AppHost.cs</c>) — a product that runs on pg17 and tests on pg16 is
+    /// testing something it does not ship.
+    /// </summary>
+    protected override string PostgresImage => "pgvector/pgvector:pg17";
 
     /// <summary>
     /// An authorized HTTP client for the dev tenant. PREFER THIS: it goes through the real
     /// pipeline, so it is the only way to prove RBAC, the approval gate and the AG-UI protocol.
     /// Pass a narrower role to assert a 403.
     /// <para>
-    /// <paramref name="tenant"/> is the tenant SLUG the caller presents. It defaults to the
-    /// pre-seeded dev tenant, which is what every RBAC and approval test wants; pass another slug to
-    /// work inside a tenant created during the test, which is the only way to prove what a second
-    /// customer actually sees (#78). A parameter rather than a hand-rolled client on purpose: a
-    /// caller assembled somewhere else re-introduces #64's constant actor, and
-    /// <c>DevAuthHeaderConventionTests</c> counts every call site in the repository.
+    /// Hides the kit's two-argument <c>AdminClient</c> on purpose, and is not merely a convenience:
+    /// it also sends <c>X-Dev-Name</c> and <c>X-Dev-Email</c> derived from the subject (#64), which
+    /// the kit's client does not, and takes the tenant SLUG the caller presents (#78) so a test can
+    /// work inside a tenant created during the test — the only way to prove what a second customer
+    /// actually sees. <c>DevAuthHeaderConventionTests</c> counts every call site in the repository,
+    /// so a caller assembled somewhere else re-introduces #64's constant actor.
     /// </para>
     /// </summary>
-    public HttpClient AdminClient(string roles = "system_admin", string subject = "it-admin", string tenant = "dev")
+    public new HttpClient AdminClient(string roles = "system_admin", string subject = "it-admin") =>
+        AdminClient(roles, subject, Contract.DevTenant);
+
+    /// <summary>
+    /// The same client in an arbitrary tenant SLUG (#78) — the only way to prove what a second
+    /// client organisation actually sees. The tenant must already exist
+    /// (<see cref="PlenipoHostFixture{TProgram}.EnsureTenantAsync"/> or the admin API creates one).
+    /// <para>
+    /// <paramref name="roles"/> carries no default deliberately: an optional third parameter beside
+    /// the kit's two-parameter <c>AdminClient</c> makes an argument-less call ambiguous between the
+    /// two, and the overload that would silently win is the kit's — the one that sends no
+    /// <c>X-Dev-Email</c>. Requiring the role keeps the two entry points distinguishable at every
+    /// call site.
+    /// </para>
+    /// </summary>
+    public HttpClient AdminClient(string roles, string subject, string tenant)
     {
-        var client = Factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Dev-Subject", subject);
-        client.DefaultRequestHeaders.Add("X-Dev-Tenant", tenant);
-        client.DefaultRequestHeaders.Add("X-Dev-Roles", roles);
-        client.DefaultRequestHeaders.Add("X-Dev-Name", DevDisplayName(subject));
+        var client = ClientFor(roles, tenant: tenant, subject: subject, displayName: DevDisplayName(subject));
         client.DefaultRequestHeaders.Add("X-Dev-Email", DevEmail(subject));
         return client;
     }
@@ -96,18 +108,12 @@ public sealed class IntegrationFixture : IAsyncLifetime
     /// <summary>
     /// A display name for a dev subject — <c>analyst-anna</c> becomes <c>Analyst Anna</c> (#64).
     /// <para>
-    /// Dev-auth defaults the <c>name</c> claim to the constant "Dev User" for every subject
-    /// (<c>DevAuthenticationHandler.cs:24</c>), and the platform writes the persisted
-    /// <c>User.DisplayName</c> from that claim at JIT provisioning and never again — the
-    /// returning-user branch of <c>RequestEnricher</c> touches only <c>LastSeenAt</c>. So the
-    /// constant is not a claim that #55's enricher can overrule; it becomes the record, and
-    /// preferring the record faithfully reports it. The only place to break the tie is at the
-    /// caller, before the row exists.
-    /// </para>
-    /// <para>
-    /// The platform already accepts <c>X-Dev-Name</c> — verified against
-    /// <c>Plenipo.AspNetCore/Auth/DevAuthenticationHandler.cs:24</c> at alpha.28, NOT against
-    /// documentation — so this needs no platform change and carries no shim.
+    /// Dev-auth defaults the <c>name</c> claim to the constant "Dev User" for every subject, and the
+    /// platform writes the persisted <c>User.DisplayName</c> from that claim at JIT provisioning and
+    /// never again — the returning-user branch of <c>RequestEnricher</c> touches only
+    /// <c>LastSeenAt</c>. So the constant is not a claim that #55's enricher can overrule; it becomes
+    /// the record, and preferring the record faithfully reports it. The only place to break the tie
+    /// is at the caller, before the row exists.
     /// </para>
     /// <para>
     /// Deliberately derived rather than looked up in a table: a table only names the subjects
@@ -125,46 +131,18 @@ public sealed class IntegrationFixture : IAsyncLifetime
     /// <c>analyst-anna@dev.auditworthy.local</c> (#64, second half).
     /// <para>
     /// The display name was only half the constant. Dev-auth also defaults the <c>email</c> claim to
-    /// <c>dev@plenipo.local</c> for EVERY subject
-    /// (<c>Plenipo.AspNetCore/Auth/DevAuthenticationHandler.cs:23</c>, alpha.28 — read from source,
-    /// not documentation), and <c>RequestEnricher</c> writes the persisted <c>User.Email</c> from
-    /// that claim on the provision path (<c>Email = email ?? subject</c>). So Admin → Users lists
-    /// every JIT-provisioned person at one address, which is the same failure as the name and is
-    /// fixed the same way: at the caller, before the row exists.
+    /// <c>dev@plenipo.local</c> for EVERY subject, and <c>RequestEnricher</c> writes the persisted
+    /// <c>User.Email</c> from that claim on the provision path — so Admin → Users lists every
+    /// JIT-provisioned person at one address, which is the same failure as the name and is fixed the
+    /// same way: at the caller, before the row exists.
     /// </para>
     /// <para>
-    /// Derived rather than tabulated, for the reason given on <see cref="DevDisplayName"/>: the
-    /// subject nobody remembered to add to a table is exactly the one that falls back to the
-    /// constant. <c>.local</c> mirrors the platform's own <c>dev@plenipo.local</c> — it is reserved
-    /// for local use and cannot be mistaken for a deliverable address.
+    /// Derived rather than tabulated, for the reason given on <see cref="DevDisplayName"/>.
+    /// <c>.local</c> mirrors the platform's own <c>dev@plenipo.local</c> — it is reserved for local
+    /// use and cannot be mistaken for a deliverable address.
     /// </para>
     /// </summary>
     public static string DevEmail(string subject) => $"{subject}@dev.auditworthy.local";
-
-    /// <summary>
-    /// A DI scope with tenant + user + permissions populated — how module tools run AFTER the
-    /// platform's auth/approval pipeline has done its part. Deliberately bypasses RBAC and the
-    /// approval gate, so it can never prove either works: use <see cref="AdminClient"/> for those.
-    /// </summary>
-    public async Task<(IServiceScope Scope, Guid TenantId, Guid UserId)> AuthorizedScopeAsync()
-    {
-        var scope = Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
-        var context = scope.ServiceProvider.GetRequiredService<RequestContext>();
-        var tenant = await db.Tenants.FirstAsync(t => t.Slug == "dev");
-        context.SetTenant(tenant.Id);
-        var user = await db.Users.IgnoreQueryFilters().FirstAsync(u => u.TenantId == tenant.Id);
-        context.SetUser(user.Id, user.Subject, user.DisplayName);
-        context.SetPermissions(["*"]);
-        return (scope, tenant.Id, user.Id);
-    }
-
-    private sealed class AuditworthyAppFactory : WebApplicationFactory<Program>
-    {
-        // Development is what turns on dev-auth and the Mock AI provider
-        // (src/Auditworthy.Host/appsettings.Development.json).
-        protected override void ConfigureWebHost(IWebHostBuilder builder) => builder.UseEnvironment("Development");
-    }
 }
 
 [CollectionDefinition("api")]

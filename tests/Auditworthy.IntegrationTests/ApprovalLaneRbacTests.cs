@@ -80,10 +80,19 @@ public sealed class ApprovalLaneRbacTests(IntegrationFixture fixture)
 
         var response = await pat.PostAsync($"/api/chat/approvals/{id}/approve", null);
 
-        Assert.Equal(HttpStatusCode.UnprocessableContent, response.StatusCode);
+        // 403, not 422. Until 0.1.0-alpha.29 this product carried the check itself
+        // (PermissionGatedTool), so the refusal arrived as a tool that threw — the executor resolved
+        // the approval Failed and answered 422. The platform now refuses the approver BEFORE any
+        // module code runs, which is a plain authorization failure and says so. The rule is
+        // unchanged and the evidence below is unchanged; only who enforces it moved.
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        // And the refusal is on the append-only record, naming the permission that was missing —
+        // "someone was denied something" is not an audit trail.
+        var denial = await WaitForDenialAsync(admin, "pat.approver");
         Assert.Contains(
             "tools.compliance.propose_control_change",
-            await response.Content.ReadAsStringAsync(),
+            denial.GetProperty("detail").GetString() ?? "",
             StringComparison.Ordinal);
 
         // The response is not the evidence — the row is.
@@ -124,6 +133,36 @@ public sealed class ApprovalLaneRbacTests(IntegrationFixture fixture)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var after = await compliance.Controls.AsNoTracking().FirstAsync(c => c.Reference == "A.5.15");
         Assert.Equal(target, after.Status);
+    }
+
+    /// <summary>
+    /// Polls the auth-event feed for this subject's <c>AccessDenied</c> row. Audit writes go through
+    /// the platform's outbox precisely so they never block the user-facing response, so the row is
+    /// not durable the instant the 403 is returned; reading once would be a flake generator.
+    /// </summary>
+    private static async Task<JsonElement> WaitForDenialAsync(HttpClient admin, string subject)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var events = JsonDocument.Parse(
+                await admin.GetStringAsync("/api/admin/audit/auth-events?take=500")).RootElement;
+
+            foreach (var entry in events.EnumerateArray())
+            {
+                if (entry.GetProperty("eventType").GetString() == "AccessDenied"
+                    && entry.GetProperty("subject").GetString() == subject)
+                {
+                    return entry.Clone();
+                }
+            }
+
+            await Task.Delay(500);
+        }
+
+        Assert.Fail($"No AccessDenied auth event for '{subject}' within the deadline.");
+        return default;
     }
 
     private static async Task EnsureApproverOnlyRoleAsync(HttpClient admin)

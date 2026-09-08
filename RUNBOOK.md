@@ -355,13 +355,13 @@ fine and is dead:
   which has no `index.html`.
 
 **One expected 404 in the browser console: `GET /api/platform/auth-config`.** The SPA is built from
-a platform checkout newer than the vendored `alpha.28` API (#69), and asks for an endpoint this
+a platform checkout newer than the vendored `alpha.29` API (#69), and asks for an endpoint this
 version does not map. It degrades cleanly — the shell falls back to dev auth and every other call
 is a 200 — so it is skew, not breakage. Do not chase it, and do not "fix" it by adding a
 product-side route: it disappears on the platform bump that brings the endpoint.
 
-**The shell always authenticates as one identity.** `@plenipo/client` bakes in
-`X-Dev-Subject: dev-user` with `X-Dev-Roles: system_admin`, and offers no subject or role switcher.
+**The shell always authenticates as one identity.** `@plenipo/client` bakes an `X-Dev-Subject` of
+`dev-user` in, with an `X-Dev-Roles` of `system_admin`, and offers no subject or role switcher.
 So the browser is an admin's view and **RBAC cannot be exercised through the UI** — to see a
 narrowed role behave, drive the API directly with the headers in §3, as the test ladder does.
 

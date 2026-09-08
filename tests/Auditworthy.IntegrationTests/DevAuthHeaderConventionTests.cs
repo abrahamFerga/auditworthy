@@ -38,14 +38,13 @@ public sealed class DevAuthHeaderConventionTests
     /// parser has stopped matching or that callers were deleted. Update it in the same commit that
     /// adds or removes one.
     /// </summary>
-    private const int KnownDevAuthCallSites = 24;
+    private const int KnownDevAuthCallSites = 23;
 
     /// <summary>
     /// How far from an <c>X-Dev-Subject</c> its <c>X-Dev-Name</c> and <c>X-Dev-Email</c> may sit. A
     /// dev-auth caller is a contiguous block of headers in every form this repo uses — an
-    /// <c>.http</c> request, a PowerShell hashtable, five <c>DefaultRequestHeaders.Add</c> lines —
-    /// and the widest real gap today is four lines (<c>IntegrationFixture.cs:80</c> to <c>:84</c>,
-    /// where the email is the last of the five). Five leaves room for one more header without
+    /// <c>.http</c> request, a PowerShell hashtable, a run of <c>DefaultRequestHeaders.Add</c> lines
+    /// — and the widest real gap today is four lines. Five leaves room for one more header without
     /// licensing a match from an unrelated block.
     /// </summary>
     private const int PairingWindow = 5;

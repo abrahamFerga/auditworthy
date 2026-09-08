@@ -1,6 +1,5 @@
 using Auditworthy.Compliance;
 using Auditworthy.Host.Authorization;
-using Auditworthy.Host.Diagnostics;
 using Auditworthy.Host.Identity;
 using Auditworthy.Host.Tenancy;
 using Microsoft.AspNetCore.Authorization;
@@ -40,28 +39,25 @@ builder.Services.AddScoped<IRequestEnricher, PersistedDisplayNameEnricher>();
 // is an additive IAuthorizationHandler rather than the "last wins" replacement used above.
 builder.Services.AddSingleton<IAuthorizationHandler, AiDecisionDisclosureGuard>();
 
-// TODO(plenipo#176) — drop this once the platform's exception handler honours the status a
-// BadHttpRequestException already carries. A request the framework could not read is a client
-// error, but app.UseExceptionHandler()'s ProblemDetails fallback writes the 500 already on the
-// response instead of the 400 the exception nominates, so an absent or unparseable AG-UI body
-// surfaced as a server fault (#72). ASP.NET offers every DI-registered IExceptionHandler the
-// exception before that fallback runs, which is why this needs no platform change and wraps no
-// platform middleware. See BadRequestEnvelopeExceptionHandler for the full ladder.
-builder.Services.AddExceptionHandler<BadRequestEnvelopeExceptionHandler>();
-
-// A permission denial is written to the audit trail (#25). The platform declares the AccessDenied
-// event type and the IAuditLog method to append one, but never calls it for an authorization
-// failure, so every 403 in this product was invisible to the one surface a compliance owner would
-// use to notice probing. alpha.28 registers NO IAuthorizationMiddlewareResultHandler of its own
-// (verified against the vendored dll), so this fills an empty seat rather than displacing anything
-// and delegates to ASP.NET's stock handler. See DeniedAccessAuditor for the upgrade hazard when a
-// later platform DOES ship one.
-builder.Services.AddSingleton<IAuthorizationMiddlewareResultHandler, DeniedAccessAuditor>();
+// Two shims stood here until 0.1.0-alpha.29 and are deliberately NOT replaced:
+//
+//   plenipo#176 — BadRequestEnvelopeExceptionHandler, which restored the 400 that a
+//   BadHttpRequestException already carries after the platform's exception handler had overwritten
+//   it with a 500 (#72). The platform honours the status now, so a second rewrite on a
+//   now-correct response is a double-apply, not defence in depth. Proved by AguiMalformedBodyTests
+//   and the kit's S12, both green with the handler gone.
+//
+//   DeniedAccessAuditor — an IAuthorizationMiddlewareResultHandler that appended the AccessDenied
+//   audit event nothing in alpha.28 wrote (#25). The platform records one for every failed
+//   authorization now (plenipo#115). Keeping ours would not have doubled the rows — ASP.NET
+//   resolves ONE handler from DI, so it displaced the platform's, and with it the diagnostic body
+//   the platform's handler gives a tenant-caused 403 (the upgrade hazard #69 named). Proved by
+//   DeniedAccessAuditTests and the kit's S07, which requires EXACTLY one AccessDenied per denial.
 
 // A tenant created after startup gets the same starter control register the pre-seeded tenant gets
 // (#78). Two call sites, one register: the platform's own ITenantProvisionedHook covers
 // POST /api/admin/tenants/provision, and the middleware below covers the bare
-// POST /api/admin/tenants, which fires no hook at alpha.28. See the Tenancy folder.
+// POST /api/admin/tenants, which still fires no hook at alpha.29. See the Tenancy folder.
 builder.Services.AddSingleton<NewTenantRegisterProvisioner>();
 builder.Services.AddPlenipoTenantProvisionedHook<StarterRegisterTenantProvisionedHook>();
 
