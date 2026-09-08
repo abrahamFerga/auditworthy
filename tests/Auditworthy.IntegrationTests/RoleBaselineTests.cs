@@ -115,6 +115,52 @@ public sealed class RoleBaselineTests(IntegrationFixture fixture)
         Assert.False(PermissionMatcher.IsGranted(granted, FutureWriteTool));
     }
 
+    /// <summary>
+    /// The reader baseline: it reads the register — including <c>get_control</c> — and proposes nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This file asserted the analyst and the owner and skipped the third shipped role entirely, so
+    /// the widest-population role in SPEC.md §6 had no baseline of its own. #11's criterion "callable
+    /// by <c>compliance-reader</c>" rested on nothing: deleting <c>tools.compliance.get_control</c>
+    /// from the reader in <c>Program.cs</c> left the whole suite green, and the loss would have
+    /// surfaced as an auditor's chat turn quietly declining to answer.
+    /// </para>
+    /// <para>
+    /// Both directions are asserted, and both are load-bearing. The grants alone would be satisfied
+    /// by a reader that had been widened into an analyst; the exclusions alone would be satisfied by
+    /// a reader with no grants at all, which <c>GET /api/admin/roles</c> returns as <c>[]</c> rather
+    /// than 404 — a reachable state, not a hypothetical one.
+    /// </para>
+    /// <para>
+    /// <c>GetControlTests.A_reader_can_call_get_control_over_agui</c> is the behavioural half of the
+    /// same criterion. This one pins the baseline; that one proves the grant actually carries a turn
+    /// through RBAC to the tool.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task The_reader_may_read_the_register_and_propose_nothing()
+    {
+        var reader = (await PermissionsForAsync("compliance-reader")).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var tool in new[] { "list_controls", "get_control" })
+        {
+            Assert.True(PermissionMatcher.IsGranted(reader, Permissions.ForTool(ComplianceModule.Id, tool)),
+                $"compliance-reader cannot call {tool}, which SPEC.md §6 grants the role. "
+                + $"Grants: {string.Join(", ", reader.Order())}");
+        }
+
+        // By effect, not spelling, for the reason this file exists: a wildcard the reader must not
+        // hold would satisfy the grants above and fail here.
+        Assert.False(PermissionMatcher.IsGranted(reader, Permissions.ForTool(ComplianceModule.Id, "propose_control_change")),
+            "compliance-reader can propose a control change — the read-only role writes. "
+            + $"Grants: {string.Join(", ", reader.Order())}");
+
+        Assert.False(PermissionMatcher.IsGranted(reader, ReviewEvidence));
+        Assert.False(PermissionMatcher.IsGranted(reader, FutureWriteTool));
+        Assert.False(PermissionMatcher.IsGranted(reader, Permissions.ManageApprovals));
+    }
+
     [Fact]
     public async Task The_owner_does_hold_the_wildcard_and_may_clear_the_gate()
     {
