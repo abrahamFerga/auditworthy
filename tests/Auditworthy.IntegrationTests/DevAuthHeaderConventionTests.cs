@@ -38,7 +38,13 @@ public sealed class DevAuthHeaderConventionTests
     /// parser has stopped matching or that callers were deleted. Update it in the same commit that
     /// adds or removes one.
     /// </summary>
-    private const int KnownDevAuthCallSites = 23;
+    /// <remarks>
+    /// 23 → 24 (#79): RUNBOOK.md §2 gained an identity check — <c>GET /api/platform/modules</c> must
+    /// name <c>compliance</c> — because a bare <c>/alive</c> 200 on a shared machine can come from a
+    /// different Plenipo product and read as a green verification of this one. It sends X-Dev-Name
+    /// and X-Dev-Email like every other caller; the count moved, the rule did not.
+    /// </remarks>
+    private const int KnownDevAuthCallSites = 24;
 
     /// <summary>
     /// How far from an <c>X-Dev-Subject</c> its <c>X-Dev-Name</c> and <c>X-Dev-Email</c> may sit. A
