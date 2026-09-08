@@ -18,12 +18,13 @@ namespace Auditworthy.IntegrationTests;
 /// a clean answer. That inversion is what #72 is about.
 /// </para>
 /// <para>
-/// The cause is not in this repo: minimal-API parameter binding throws
+/// The cause was never in this repo: minimal-API parameter binding throws
 /// <c>BadHttpRequestException</c>, which already carries <c>StatusCode = 400</c>, and the
-/// platform's <c>ExceptionHandlerMiddleware</c> discards that status and writes the generic 500
-/// ProblemDetails. The product shim is
-/// <c>Auditworthy.Host.Diagnostics.BadRequestEnvelopeExceptionHandler</c>; see its comments for the
-/// escalation ladder and the <c>TODO(plenipo#176)</c> that retires it.
+/// platform's <c>ExceptionHandlerMiddleware</c> discarded that status and wrote the generic 500
+/// ProblemDetails. This product carried an <c>IExceptionHandler</c> shim for it until Plenipo
+/// <c>0.1.0-alpha.29</c> honoured the status itself (plenipo#176); the shim is gone and these
+/// assertions are unchanged, which is the whole point of them. The platform's own conformance kit
+/// makes the same claim from the other side, in <c>PlenipoSpineConformance</c> S12.
 /// </para>
 /// <para>
 /// These assert on the transport, so they go through real HTTP with dev-auth headers via

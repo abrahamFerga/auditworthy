@@ -10,7 +10,7 @@ namespace Auditworthy.Host.Tenancy;
 /// endpoint reaches it. The bare create endpoint builds a <c>Tenant</c>, saves it and returns 201
 /// with no hook, no event and no notification of any kind
 /// (<c>Plenipo.AspNetCore/Endpoints/AdminEndpoints.cs</c>, <c>Admin_CreateTenant</c>, read at
-/// v0.1.0-alpha.28 — the version this product vendors). That endpoint is the one #78 was reported
+/// v0.1.0-alpha.29 — the version this product vendors). That endpoint is the one #78 was reported
 /// against, and a product cannot re-map or replace a platform route from its own module, so the
 /// only thing left inside the product is to observe the outcome.
 /// </para>

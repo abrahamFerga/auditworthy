@@ -43,7 +43,7 @@ public sealed class NewTenantRegisterTests(IntegrationFixture fixture)
 
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
 
-        using var tenantClient = fixture.AdminClient(subject: "acme-admin", tenant: slug);
+        using var tenantClient = fixture.AdminClient(roles: "system_admin", subject: "acme-admin", tenant: slug);
         var response = await tenantClient.GetAsync("/api/compliance/controls");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -69,7 +69,7 @@ public sealed class NewTenantRegisterTests(IntegrationFixture fixture)
 
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
 
-        using var tenantClient = fixture.AdminClient(subject: "beta-admin", tenant: slug);
+        using var tenantClient = fixture.AdminClient(roles: "system_admin", subject: "beta-admin", tenant: slug);
         var references = ReferencesIn(await tenantClient.GetStringAsync("/api/compliance/controls"));
 
         Assert.Equal(StarterReferences.OrderBy(r => r), references.OrderBy(r => r));
@@ -93,7 +93,7 @@ public sealed class NewTenantRegisterTests(IntegrationFixture fixture)
         var after = ReferencesIn(await operatorClient.GetStringAsync("/api/compliance/controls"));
         Assert.Equal(before.OrderBy(r => r), after.OrderBy(r => r));
 
-        using var tenantClient = fixture.AdminClient(subject: "gamma-admin", tenant: slug);
+        using var tenantClient = fixture.AdminClient(roles: "system_admin", subject: "gamma-admin", tenant: slug);
         var theirs = ReferencesIn(await tenantClient.GetStringAsync("/api/compliance/controls"));
 
         // Same references, different rows: six controls each, not one register shared by two
@@ -123,7 +123,7 @@ public sealed class NewTenantRegisterTests(IntegrationFixture fixture)
         await provisioner.EnsureStarterRegisterAsync(tenantId, slug, CancellationToken.None);
         await provisioner.EnsureStarterRegisterAsync(tenantId, slug, CancellationToken.None);
 
-        using var tenantClient = fixture.AdminClient(subject: "delta-admin", tenant: slug);
+        using var tenantClient = fixture.AdminClient(roles: "system_admin", subject: "delta-admin", tenant: slug);
         var references = ReferencesIn(await tenantClient.GetStringAsync("/api/compliance/controls"));
 
         Assert.Equal(StarterReferences.Length, references.Length);

@@ -8,7 +8,7 @@ namespace Auditworthy.Host.Authorization;
 /// TODO(plenipo#155) — remove this once the platform can gate the ADMT disclosure surface.
 /// <para>
 /// The platform maps <c>GET /api/platform/ai-decisions</c> with a bare <c>RequireAuthorization()</c>
-/// (<c>Plenipo.AspNetCore/Endpoints/DisclosureEndpoints.cs</c>, alpha.28), so ANY authenticated
+/// (<c>Plenipo.AspNetCore/Endpoints/DisclosureEndpoints.cs</c>, still so at alpha.29), so ANY authenticated
 /// member of the tenant reads it. That is deliberate, not a slip: the endpoint is the automated-
 /// decision transparency surface CPPA ADMT rules expect, and the platform pins the behaviour with
 /// <c>A_plain_user_needs_no_admin_permission_to_read_their_disclosure</c>. Transparency only an
@@ -36,10 +36,12 @@ namespace Auditworthy.Host.Authorization;
 /// succeeded. So this adds a requirement the platform's policy does not carry without touching the
 /// platform's own registrations. The obvious alternative — replacing
 /// <c>IAuthorizationMiddlewareResultHandler</c>, the seam this product already uses for
-/// <c>IRequestEnricher</c> — was rejected: alpha.28 registers none, but a later platform version
-/// does (<c>UnresolvedTenantAuthorizationResultHandler</c>), and a "last wins" registration would
-/// then silently delete that handler on upgrade. Failing the requirement leaves the platform's
-/// 403 pipeline, including any future result handler, entirely intact.
+/// <c>IRequestEnricher</c> — was rejected: alpha.28 registered none, but the upgrade this warned
+/// about has since happened — alpha.29 ships
+/// <c>UnresolvedTenantAuthorizationResultHandler</c> — and a "last wins" registration would have
+/// silently deleted it. (That is exactly what did happen to this product's own
+/// <c>DeniedAccessAuditor</c>, retired in auditworthy#101.) Failing the requirement leaves the
+/// platform's 403 pipeline, result handler included, entirely intact.
 /// </para>
 /// <para>
 /// The trade-off is recorded rather than hidden: a user who holds no <c>compliance.view</c> now

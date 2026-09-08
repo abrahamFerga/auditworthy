@@ -13,18 +13,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.2" />
+    <!-- The platform's conformance kit, at the platform version: the Testcontainers host fixture,
+         the AG-UI stream parser, the golden-eval runner and the spine/manifest/tenancy/red-team
+         invariant packs, executed against THIS host. It also carries the harness dependencies that
+         used to be pinned here one by one — Microsoft.AspNetCore.Mvc.Testing 10.0.10,
+         Testcontainers.PostgreSql 4.15.0 and SSH.NET 2026.0.0 (past GHSA-q939-rpr3-3284, which is
+         NU1903 at restore under this project's TreatWarningsAsErrors) — so a direct reference to any
+         of them now only risks an NU1605 downgrade. -->
+    <PackageReference Include="Plenipo.Testing" Version="$(PlenipoVersion)" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="Testcontainers.PostgreSql" Version="4.6.0" />
-    <!-- Transitive-only, and pinned deliberately: Testcontainers pulls SSH.NET for an SSH transport
-         this project never uses, and every shipping Testcontainers version resolves it inside
-         GHSA-q939-rpr3-3284's affected range (<= 2025.1.0; first patched 2026.0.0) — 4.9.0 still
-         lands on 2025.1.0. Under this project's TreatWarningsAsErrors that advisory is NU1903 at
-         *restore*, which takes rung 3 of the test ladder offline entirely. A direct reference
-         raises the resolved version past the advisory and keeps the audit gate armed; suppressing
-         NU1903 or dropping TreatWarningsAsErrors would trade the signal for the rung and lose both.
-         Remove this line once Testcontainers ships a release that resolves SSH.NET >= 2026.0.0. -->
-    <PackageReference Include="SSH.NET" Version="2026.0.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.0" />
   </ItemGroup>
@@ -33,10 +30,11 @@
     <ProjectReference Include="..\..\src\Auditworthy.Host\Auditworthy.Host.csproj" />
   </ItemGroup>
 
-  <!-- Golden-conversation evals are data, not code: without this they never reach the test output
-       and GoldenEvalTests runs zero cases while reporting green. -->
-  <ItemGroup>
-    <Content Include="Evals\cases\*.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
+  <!-- Golden-conversation evals are data, not code, and must reach the test output or the theory
+       runs zero cases while reporting green. The Content item is no longer declared here: the kit's
+       buildTransitive/Plenipo.Testing.targets copies Evals\cases\*.json for every consumer (it
+       Excludes @(Content), so declaring it in both is not an error — it is just a second place to
+       forget). Opt out with <PlenipoTestingEvalCases>false</PlenipoTestingEvalCases>. -->
+
 
 </Project>
