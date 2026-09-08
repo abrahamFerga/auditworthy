@@ -56,9 +56,42 @@ dotnet run --project src/Auditworthy.AppHost
 ```
 
 Brings up Postgres (`plenipo-platform` + `plenipo-audit` databases), Redis, and the API, then opens
-the **Aspire dashboard** (URL printed to the console, with a login token). Take the API's external
-HTTP endpoint from the dashboard resource **`auditworthy-api`**; that base URL is what every call
-below targets.
+the **Aspire dashboard** (URL printed to the console, with a login token).
+
+**The API's base URL is `http://127.0.0.1:9433`.** It is pinned in `AppHost.cs`, so it is the same
+on every machine and in every run — you do not have to go and find it, and every call below targets
+it. The dashboard resource **`auditworthy-api`** lists the same address, and the UI is served there
+too (§4 The UI).
+
+> This used to read *"take the API's external HTTP endpoint from the dashboard resource"*, and that
+> instruction could not be followed: there was no such endpoint to take. `WithExternalHttpEndpoints()`
+> only marks endpoints that already exist — it creates none — so the API resource had none at all,
+> and Kestrel fell back to the ASP.NET default `:5000`, which Aspire never knew about and the
+> dashboard never listed (#79). Seen on a live host 2026-09-08: resource `Running`, URL column
+> empty, stdout `Now listening on: http://localhost:5000`. The endpoint is now declared explicitly,
+> and `AppHostCompositionTests.Api_resource_declares_the_pinned_external_http_endpoint` fails the
+> build if it goes missing again.
+
+**Confirm identity, never liveness alone.** Other Plenipo products may be running on the same
+machine, so a bare `/alive` 200 can come from a *different product* and read as a green
+verification of this one. Make the check positive — this must name `compliance`:
+
+```bash
+curl -s http://127.0.0.1:9433/api/platform/modules \
+  -H "X-Dev-Subject: dev-user" -H "X-Dev-Tenant: dev" -H "X-Dev-Roles: system_admin" \
+  -H "X-Dev-Name: Dev User" -H "X-Dev-Email: dev-user@dev.auditworthy.local"
+```
+
+**Do not unpin 9433 to dodge a bind conflict.** A conflict means another Auditworthy AppHost is
+already up; the loud failure is the guard working. Stop the stale one — and note that a still-running
+AppHost also locks `Auditworthy.AppHost.exe`, which fails the next build with `MSB3021`/`MSB3027`
+("used by another process"), an error that reads like a compile break and is not one.
+
+**No `launchSettings.json`, by design.** `dotnet run` and the IDEs generate one into
+`src/Auditworthy.Host/Properties/` unasked, and Aspire otherwise reads its `applicationUrl` to derive
+the API's endpoints — a generated, untracked, per-machine file silently deciding the ports. The
+AppHost declares the resource with `launchProfileName: null` so the file cannot be read even when it
+exists, and `.gitignore` keeps it out of commits. If you find one, you can delete it; nothing reads it.
 
 **`dotnet run` and `aspire run` are not equivalent.** They start the same stack, but an AppHost
 launched with `dotnet run` is **invisible to the Aspire MCP** — which is the entire agent-readable
@@ -544,6 +577,8 @@ that means the diagnosis is wrong, not the fix.
 | `42P01: relation "compliance.<table>" does not exist` | the module's own schema is never created: `ComplianceModule` must implement `IModule.MigrateAsync` (and `SeedAsync`). The platform migrates *itself* and then calls each module — it cannot invent your DDL |
 | Aspire: containers up, API not there yet, stack "hangs" after the banner | **read the API's log, don't wait it out** (§2 Mode A) — the dashboard's `/consolelogs/resource/auditworthy-api`, or the newest `%TEMP%\aspire-dcp*\<guid>_err`. Then: someone removed the `.WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")` the AppHost applies **inside its `if (builder.ExecutionContext.IsRunMode)` block**, so the API starts in Production and `AddPlenipoPlatform()` throws on dev-auth (#54 — `AppHostCompositionTests` fails for this). Exporting the variable in your own shell will **not** rescue it: Aspire does not propagate the AppHost's process environment to a project resource, measured 2026-08-08. Equally, do not "fix" a publish-mode complaint by unwrapping that `if` — the guard is deliberate and its own test asserts the key is absent under a publish operation; a stale Postgres **data volume** initialized with a different password (`docker volume rm auditworthy-pg-data`; dev data is throwaway); or someone re-added `WaitFor` on the two **database** resources — wait for the postgres **server**, never the databases, or the wait is circular |
 | Aspire: `auditworthy-api` appears and then exits, with nothing in the AppHost console | project logs go to the **dashboard**, not to the terminal you launched from — open `/consolelogs/resource/auditworthy-api`, or relaunch with `aspire run` and read them through the MCP. Reproduce the same boot in seconds with Mode B, which shows the exception on stderr |
+| Aspire: `auditworthy-api` is `Running` but its **URLs column is empty**, and the API answers on `:5000` | the API resource has no declared endpoint, so DCP launched it with no `--urls` and Kestrel fell back to the ASP.NET default (#79). `AppHost.cs` must declare `WithHttpEndpoint(port: 9433, targetPort: 9433, isProxied: false)` **before** `WithExternalHttpEndpoints()` — the latter only marks endpoints that already exist. `AppHostCompositionTests` fails the build for this |
+| `MSB3021` / `MSB3027` *"used by another process"* on `Auditworthy.AppHost.exe` or `Auditworthy.Host.dll` | a previous AppHost (or API) is still running and holds the file. Stop it; it is not a compile error |
 | Aspire refuses to start: *"the 'applicationUrl' setting must be an https address"* | you pinned the dashboard with an `http` URL. Use `--ASPNETCORE_URLS=https://localhost:18888` |
 | Postgres data corrupted / ghost rows after running two AppHosts | both mounted the same data volume; the second cleared the first's `postmaster.pid` as stale. Host port 15433 is pinned so the second run now fails fast at bind time — **don't unpin it**, and never move it to 15432 (that is Networthy's) |
 | Migration fails on `vector` type | the image must be **pgvector**, not stock `postgres` |

@@ -14,6 +14,9 @@ module and nothing else.
 dotnet run --project src/Auditworthy.AppHost
 ```
 
+The API and its UI are at **`http://127.0.0.1:9433`** (pinned in the AppHost); the Aspire dashboard's
+URL and login token are printed to the console.
+
 Needs the **.NET 10 SDK** (pinned in `global.json`) and **Docker Desktop running**. **No AI key** —
 the assistant runs on Plenipo's deterministic `Mock` provider, which performs real, audited tool
 calls including the approval gate.

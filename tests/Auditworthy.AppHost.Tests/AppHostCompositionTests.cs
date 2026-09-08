@@ -29,6 +29,12 @@ public sealed class AppHostCompositionTests
     private const string ApiResourceName = "auditworthy-api";
 
     /// <summary>
+    /// The port <c>AppHost.cs</c> pins for the API. Keep the two in step, and keep this value
+    /// unique across every Plenipo product on the machine — see the endpoint comment in AppHost.cs.
+    /// </summary>
+    private const int ExpectedApiPort = 9433;
+
+    /// <summary>
     /// Args that put the builder into publish mode. Verified empirically against the shipped
     /// Aspire.Hosting 13.4.6 assembly rather than taken from documentation: with no args the
     /// resolved <c>DistributedApplicationExecutionContext.Operation</c> is <c>Run</c>, and with
@@ -76,6 +82,68 @@ public sealed class AppHostCompositionTests
         }
 
         return environment;
+    }
+
+    /// <summary>
+    /// The endpoint guard (#79).
+    ///
+    /// <c>WithExternalHttpEndpoints()</c> does not create an endpoint; it only sets
+    /// <c>IsExternal</c> on endpoints that already exist. The AppHost called it and nothing else,
+    /// so the API resource had no endpoint at all: DCP launched the project with no <c>--urls</c>
+    /// and no launch profile, Kestrel fell back to the ASP.NET default, and the API served on
+    /// <c>http://127.0.0.1:5000</c> — invisible to Aspire, absent from the dashboard (which RUNBOOK
+    /// §2 told the reader to take the base URL from), and on the single most collision-prone port
+    /// on a developer machine. Measured, not inferred: on 2026-09-08 the dashboard listed
+    /// <c>auditworthy-api</c> as Running with no URL, and its captured stdout read
+    /// <c>Now listening on: http://localhost:5000</c>.
+    ///
+    /// Against the shipped Aspire.Hosting 13.4.6 assembly this model resolves to <b>zero</b>
+    /// endpoints on <c>auditworthy-api</c> with no <c>launchSettings.json</c> present, and to two
+    /// random ones when a tooling-generated profile is present. Hence both halves of what this
+    /// asserts: the endpoint is declared in <c>AppHost.cs</c>, and its port is the pinned one rather
+    /// than whatever a generated profile happened to contain. <c>launchProfileName: null</c> is
+    /// what makes the second half hold on a machine where such a file exists.
+    /// </summary>
+    [Fact]
+    public async Task Api_resource_declares_the_pinned_external_http_endpoint()
+    {
+        var builder = await DistributedApplicationTestingBuilder
+            .CreateAsync<Projects.Auditworthy_AppHost>([]);
+
+        await using var app = await builder.BuildAsync();
+
+        var model = app.Services.GetRequiredService<DistributedApplicationModel>();
+        var api = Assert.Single(
+            model.Resources.OfType<ProjectResource>(),
+            r => r.Name == ApiResourceName);
+
+        var endpoints = api.Annotations.OfType<EndpointAnnotation>().ToList();
+
+        var http = endpoints.SingleOrDefault(e => e.UriScheme == "http");
+
+        Assert.True(
+            http is not null,
+            $"'{ApiResourceName}' declares no http endpoint (it has {endpoints.Count}: " +
+            $"{string.Join(", ", endpoints.Select(e => $"{e.Name}/{e.UriScheme}:{e.Port?.ToString() ?? "auto"}"))}). " +
+            "WithExternalHttpEndpoints() only marks endpoints that already exist — it creates none. " +
+            "With nothing declared, DCP starts the project with no --urls and Kestrel falls back to " +
+            "the ASP.NET default :5000, which Aspire cannot see or proxy. Declare it in AppHost.cs " +
+            "with WithHttpEndpoint(port: ApiPort, targetPort: ApiPort, isProxied: false).");
+
+        Assert.Equal(ExpectedApiPort, http!.Port);
+        Assert.Equal(ExpectedApiPort, http.TargetPort);
+
+        Assert.True(
+            http.IsExternal,
+            $"'{ApiResourceName}' declares an http endpoint on {http.Port} but it is not external, " +
+            "so the Aspire dashboard does not surface it as the base URL RUNBOOK §2 tells the " +
+            "reader to use. Keep the WithExternalHttpEndpoints() call after the declaration.");
+
+        Assert.False(
+            http.IsProxied,
+            $"'{ApiResourceName}' http endpoint on {http.Port} is proxied, so {http.Port} is an " +
+            "Aspire proxy and Kestrel binds some other, unpredictable port. RUNBOOK §2 publishes " +
+            "this port as the one address to call; keep isProxied: false so it is the real one.");
     }
 
     [Fact]
